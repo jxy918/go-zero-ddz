@@ -1,0 +1,129 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ddz
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: game-config
+  namespace: ddz
+data:
+  game.yaml: |
+    Name: game-service
+    Host: 0.0.0.0
+    Port: 8080
+    Redis:
+      Host: redis:6379
+      Type: node
+    WebSocket:
+      ReadBufferSize: 4096
+      WriteBufferSize: 4096
+      HandshakeTimeout: 10
+      PingPeriod: 30
+      PongWait: 60
+      MaxMessageSize: 65536
+    Room:
+      MaxRooms: 1000
+      MaxPlayersPerRoom: 3
+      ReadyTimeout: 60
+      PlayTimeout: 15
+      ReconnectTimeout: 300
+      SnapshotInterval: 30
+    Match:
+      Enabled: true
+      ScanInterval: 2
+      RandomTimeout: 15
+      RankedTimeout: 30
+      EloRange: 100
+    AI:
+      Enabled: true
+      DefaultDifficulty: normal
+    Log:
+      Mode: console
+      Level: info
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: game-service
+  namespace: ddz
+  labels:
+    app: game-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: game-service
+  template:
+    metadata:
+      labels:
+        app: game-service
+    spec:
+      containers:
+        - name: game-service
+          image: go-zero-ddz:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: ws
+              protocol: TCP
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          args: ["-f", "/app/etc/game.yaml"]
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: game-service
+  namespace: ddz
+spec:
+  selector:
+    app: game-service
+  ports:
+    - name: ws
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-api
+  namespace: ddz
+spec:
+  selector:
+    app: user-api
+  ports:
+    - name: http
+      port: 8888
+      targetPort: 8888
+      protocol: TCP
+  type: ClusterIP

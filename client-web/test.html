@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>斗地主测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #1a472a; color: white; }
+        .btn { padding: 10px 20px; background: #4ade80; color: #1a472a; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .btn:hover { background: #22c55e; }
+        .message { margin: 10px 0; padding: 10px; border-radius: 8px; }
+        .success { background: green; }
+        .error { background: red; }
+        .log { background: rgba(255,255,255,0.1); padding: 10px; margin: 10px 0; border-radius: 8px; font-family: monospace; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>🃏 斗地主测试</h1>
+    
+    <div id="login-section">
+        <h2>登录</h2>
+        <input type="text" id="username" placeholder="用户名" value="test"><br><br>
+        <input type="password" id="password" placeholder="密码" value="123"><br><br>
+        <button class="btn" onclick="login()">登录</button>
+    </div>
+    
+    <div id="game-section" style="display: none;">
+        <h2>游戏大厅</h2>
+        <button class="btn" onclick="createRoom()">创建房间</button>
+        <br><br>
+        <input type="text" id="room-id" placeholder="房间号">
+        <button class="btn" onclick="joinRoom()">加入房间</button>
+        <button class="btn" onclick="ready()">准备</button>
+    </div>
+    
+    <div id="game-screen" style="display: none;">
+        <h2>游戏界面</h2>
+        <div id="my-cards">我的手牌：</div>
+        <div id="timer">计时器: 15s</div>
+        <button class="btn" onclick="playCards()">出牌</button>
+        <button class="btn" onclick="pass()">不出</button>
+    </div>
+    
+    <div id="messages"></div>
+    <div id="logs" class="log"></div>
+    
+    <script>
+        let ws = null;
+        let token = null;
+        let uid = null;
+        let roomId = null;
+        
+        function log(msg) {
+            document.getElementById('logs').innerHTML += '<br>' + new Date().toLocaleTimeString() + ': ' + msg;
+        }
+        
+        function showMessage(msg, type) {
+            const el = document.getElementById('messages');
+            el.innerHTML = '<div class="message ' + type + '">' + msg + '</div>';
+        }
+        
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                const resp = await fetch('http://localhost:8888/user/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await resp.json();
+                
+                if (data.code === 0) {
+                    token = data.data.token;
+                    uid = data.data.uid;
+                    log('登录成功! UID: ' + uid);
+                    showMessage('登录成功', 'success');
+                    document.getElementById('login-section').style.display = 'none';
+                    document.getElementById('game-section').style.display = 'block';
+                    connectWS();
+                } else {
+                    showMessage(data.message || '登录失败', 'error');
+                }
+            } catch (error) {
+                showMessage('登录失败: ' + error.message, 'error');
+                log('登录错误: ' + error.message);
+            }
+        }
+        
+        function connectWS() {
+            ws = new WebSocket('ws://localhost:8080/ws?token=' + encodeURIComponent(token));
+            ws.binaryType = 'arraybuffer';
+            
+            ws.onopen = () => {
+                log('WebSocket连接成功');
+                sendMessage(0x0101, { token: token });
+            };
+            
+            ws.onmessage = (event) => {
+                handleMessage(event.data);
+            };
+            
+            ws.onclose = () => {
+                log('WebSocket断开');
+            };
+            
+            ws.onerror = (error) => {
+                log('WebSocket错误: ' + error);
+            };
+        }
+        
+        function sendMessage(msgId, data) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('WebSocket未连接');
+                return;
+            }
+            
+            const payload = JSON.stringify(data);
+            const payloadBytes = new TextEncoder().encode(payload);
+            const frame = new ArrayBuffer(4 + 2 + payloadBytes.length);
+            const view = new DataView(frame);
+            
+            view.setUint32(0, 2 + payloadBytes.length, false);
+            view.setUint16(4, msgId, false);
+            new Uint8Array(frame, 6).set(payloadBytes);
+            
+            ws.send(frame);
+            log('发送消息: ' + msgId.toString(16) + ' - ' + payload);
+        }
+        
+        function handleMessage(data) {
+            const view = new DataView(data);
+            const length = view.getUint32(0, false);
+            const msgId = view.getUint16(4, false);
+            const payloadBytes = new Uint8Array(data, 6, length - 2);
+            const payload = new TextDecoder().decode(payloadBytes);
+            
+            log('收到消息: ' + msgId.toString(16) + ' - ' + payload);
+            
+            try {
+                const jsonData = JSON.parse(payload);
+                
+                switch(msgId) {
+                    case 0x0102: // LOGIN_RESP
+                        if (jsonData.success) {
+                            log('游戏服务登录成功');
+                        }
+                        break;
+                        
+                    case 0x0202: // CREATE_ROOM_RESP
+                        if (jsonData.success) {
+                            roomId = jsonData.room_id;
+                            showMessage('房间创建成功: ' + roomId, 'success');
+                            document.getElementById('game-section').style.display = 'none';
+                            document.getElementById('game-screen').style.display = 'block';
+                        }
+                        break;
+                        
+                    case 0x0401: // DEAL_CARDS_NOTIFY
+                        log('收到手牌: ' + JSON.stringify(jsonData.my_cards));
+                        document.getElementById('my-cards').innerHTML = '我的手牌: ' + jsonData.my_cards.length + '张';
+                        break;
+                        
+                    case 0x0408: // TIMER_NOTIFY
+                        document.getElementById('timer').innerHTML = '计时器: ' + jsonData.remaining_seconds + 's';
+                        break;
+                        
+                    case 0x0003: // ERROR
+                        showMessage('错误: ' + jsonData.message, 'error');
+                        break;
+                }
+            } catch (e) {
+                log('解析消息失败: ' + e);
+            }
+        }
+        
+        function createRoom() {
+            log('创建房间...');
+            sendMessage(0x0201, {});
+        }
+        
+        function joinRoom() {
+            const room = document.getElementById('room-id').value;
+            sendMessage(0x0203, { room_id: room });
+        }
+        
+        function ready() {
+            sendMessage(0x0207, {});
+        }
+        
+        function playCards() {
+            sendMessage(0x0501, { cards: [] });
+        }
+        
+        function pass() {
+            sendMessage(0x0501, { cards: [] });
+        }
+    </script>
+</body>
+</html>

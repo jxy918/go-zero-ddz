@@ -1,0 +1,519 @@
+{
+  "__type__": "cc.Scene",
+  "name": "MainScene",
+  "active": true,
+  "isStatic": false,
+  "layer": 1,
+  "children": [
+    {
+      "__type__": "cc.Node",
+      "name": "Canvas",
+      "active": true,
+      "isStatic": false,
+      "layer": 1,
+      "children": [
+        {
+          "__type__": "cc.Node",
+          "name": "LoginPanel",
+          "active": true,
+          "isStatic": false,
+          "layer": 1,
+          "components": [
+            {
+              "__type__": "cc.Widget",
+              "isAlignTop": true,
+              "isAlignBottom": true,
+              "isAlignLeft": true,
+              "isAlignRight": true
+            },
+            {
+              "__type__": "LoginPanel",
+              "usernameEdit": { "__uuid__": "edit-username" },
+              "passwordEdit": { "__uuid__": "edit-password" },
+              "messageLabel": { "__uuid__": "label-message" },
+              "loginBtn": { "__uuid__": "btn-login" },
+              "registerBtn": { "__uuid__": "btn-register" }
+            }
+          ],
+          "children": [
+            {
+              "__type__": "cc.Node",
+              "name": "Background",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.Sprite",
+                  "spriteFrame": null
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "UsernameInput",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.EditBox",
+                  "uuid": "edit-username",
+                  "placeholder": "用户名",
+                  "maxLength": 20
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "PasswordInput",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.EditBox",
+                  "uuid": "edit-password",
+                  "placeholder": "密码",
+                  "maxLength": 20,
+                  "inputFlag": 2
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "MessageLabel",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.Label",
+                  "uuid": "label-message",
+                  "string": "",
+                  "fontSize": 24
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "LoginBtn",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.Button",
+                  "uuid": "btn-login",
+                  "transition": 1
+                },
+                {
+                  "__type__": "cc.Label",
+                  "string": "登录",
+                  "fontSize": 28
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "RegisterBtn",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.Button",
+                  "uuid": "btn-register",
+                  "transition": 1
+                },
+                {
+                  "__type__": "cc.Label",
+                  "string": "注册",
+                  "fontSize": 28
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "__type__": "cc.Node",
+          "name": "LobbyPanel",
+          "active": false,
+          "isStatic": false,
+          "layer": 1,
+          "components": [
+            {
+              "__type__": "cc.Widget",
+              "isAlignTop": true,
+              "isAlignBottom": true,
+              "isAlignLeft": true,
+              "isAlignRight": true
+            }
+          ],
+          "children": [
+            {
+              "__type__": "cc.Node",
+              "name": "CreateRoomBtn",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.Button",
+                  "transition": 1
+                },
+                {
+                  "__type__": "cc.Label",
+                  "string": "创建房间",
+                  "fontSize": 32
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "RoomIdInput",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.EditBox",
+                  "placeholder": "房间ID",
+                  "maxLength": 10
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "JoinRoomBtn",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.Button",
+                  "transition": 1
+                },
+                {
+                  "__type__": "cc.Label",
+                  "string": "加入房间",
+                  "fontSize": 32
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "__type__": "cc.Node",
+          "name": "GamePanel",
+          "active": false,
+          "isStatic": false,
+          "layer": 1,
+          "components": [
+            {
+              "__type__": "cc.Widget",
+              "isAlignTop": true,
+              "isAlignBottom": true,
+              "isAlignLeft": true,
+              "isAlignRight": true
+            },
+            {
+              "__type__": "GamePanel",
+              "cardPrefab": { "__uuid__": "prefab-card" },
+              "myCardsContainer": { "__uuid__": "container-mycards" },
+              "opponentLeftCards": { "__uuid__": "node-left" },
+              "opponentRightCards": { "__uuid__": "node-right" },
+              "lastPlayArea": { "__uuid__": "area-lastplay" },
+              "timerLabel": { "__uuid__": "label-timer" },
+              "currentPlayerLabel": { "__uuid__": "label-current" },
+              "myRoleLabel": { "__uuid__": "label-role" },
+              "playBtn": { "__uuid__": "btn-play" },
+              "passBtn": { "__uuid__": "btn-pass" },
+              "callBtn": { "__uuid__": "btn-call" },
+              "passCallBtn": { "__uuid__": "btn-passcall" },
+              "callPanel": { "__uuid__": "panel-call" },
+              "leftPlayerInfo": { "__uuid__": "panel-left-info" },
+              "rightPlayerInfo": { "__uuid__": "panel-right-info" },
+              "timerSprite": { "__uuid__": "sprite-timer" }
+            }
+          ],
+          "children": [
+            {
+              "__type__": "cc.Node",
+              "name": "LeftPlayer",
+              "uuid": "panel-left-info",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "children": [
+                {
+                  "__type__": "cc.Node",
+                  "name": "Name",
+                  "active": true,
+                  "isStatic": false,
+                  "layer": 1,
+                  "components": [
+                    {
+                      "__type__": "cc.Label",
+                      "string": "AI_001",
+                      "fontSize": 20
+                    }
+                  ]
+                },
+                {
+                  "__type__": "cc.Node",
+                  "name": "Role",
+                  "active": true,
+                  "isStatic": false,
+                  "layer": 1,
+                  "components": [
+                    {
+                      "__type__": "cc.Label",
+                      "string": "",
+                      "fontSize": 24
+                    }
+                  ]
+                },
+                {
+                  "__type__": "cc.Node",
+                  "name": "CardCount",
+                  "active": true,
+                  "isStatic": false,
+                  "layer": 1,
+                  "components": [
+                    {
+                      "__type__": "cc.Label",
+                      "string": "17",
+                      "fontSize": 24
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "RightPlayer",
+              "uuid": "panel-right-info",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "children": [
+                {
+                  "__type__": "cc.Node",
+                  "name": "Name",
+                  "active": true,
+                  "isStatic": false,
+                  "layer": 1,
+                  "components": [
+                    {
+                      "__type__": "cc.Label",
+                      "string": "AI_002",
+                      "fontSize": 20
+                    }
+                  ]
+                },
+                {
+                  "__type__": "cc.Node",
+                  "name": "Role",
+                  "active": true,
+                  "isStatic": false,
+                  "layer": 1,
+                  "components": [
+                    {
+                      "__type__": "cc.Label",
+                      "string": "",
+                      "fontSize": 24
+                    }
+                  ]
+                },
+                {
+                  "__type__": "cc.Node",
+                  "name": "CardCount",
+                  "active": true,
+                  "isStatic": false,
+                  "layer": 1,
+                  "components": [
+                    {
+                      "__type__": "cc.Label",
+                      "string": "17",
+                      "fontSize": 24
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "MyCardsContainer",
+              "uuid": "container-mycards",
+              "active": true,
+              "isStatic": false,
+              "layer": 1
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "LastPlayArea",
+              "uuid": "area-lastplay",
+              "active": true,
+              "isStatic": false,
+              "layer": 1
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "Timer",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.Sprite",
+                  "uuid": "sprite-timer"
+                },
+                {
+                  "__type__": "cc.Label",
+                  "uuid": "label-timer",
+                  "string": "15",
+                  "fontSize": 48
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "CurrentPlayerLabel",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.Label",
+                  "uuid": "label-current",
+                  "string": "轮到你出牌",
+                  "fontSize": 28
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "MyRoleLabel",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.Label",
+                  "uuid": "label-role",
+                  "string": "农民",
+                  "fontSize": 24
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "PlayBtn",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.Button",
+                  "uuid": "btn-play",
+                  "transition": 1
+                },
+                {
+                  "__type__": "cc.Label",
+                  "string": "出牌",
+                  "fontSize": 32
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "PassBtn",
+              "active": true,
+              "isStatic": false,
+              "layer": 1,
+              "components": [
+                {
+                  "__type__": "cc.Button",
+                  "uuid": "btn-pass",
+                  "transition": 1
+                },
+                {
+                  "__type__": "cc.Label",
+                  "string": "不出",
+                  "fontSize": 32
+                }
+              ]
+            },
+            {
+              "__type__": "cc.Node",
+              "name": "CallPanel",
+              "uuid": "panel-call",
+              "active": false,
+              "isStatic": false,
+              "layer": 1,
+              "children": [
+                {
+                  "__type__": "cc.Node",
+                  "name": "CallBtn",
+                  "active": true,
+                  "isStatic": false,
+                  "layer": 1,
+                  "components": [
+                    {
+                      "__type__": "cc.Button",
+                      "uuid": "btn-call",
+                      "transition": 1
+                    },
+                    {
+                      "__type__": "cc.Label",
+                      "string": "叫地主",
+                      "fontSize": 32
+                    }
+                  ]
+                },
+                {
+                  "__type__": "cc.Node",
+                  "name": "PassCallBtn",
+                  "active": true,
+                  "isStatic": false,
+                  "layer": 1,
+                  "components": [
+                    {
+                      "__type__": "cc.Button",
+                      "uuid": "btn-passcall",
+                      "transition": 1
+                    },
+                    {
+                      "__type__": "cc.Label",
+                      "string": "不叫",
+                      "fontSize": 32
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "components": [
+        {
+          "__type__": "cc.Canvas",
+          "designResolution": { "width": 1280, "height": 720 },
+          "fitMode": 1
+        },
+        {
+          "__type__": "MainScene",
+          "loginPanel": { "__uuid__": "panel-login" },
+          "lobbyPanel": { "__uuid__": "panel-lobby" },
+          "gamePanel": { "__uuid__": "panel-game" },
+          "loginComponent": { "__uuid__": "comp-login" },
+          "gameComponent": { "__uuid__": "comp-game" }
+        }
+      ]
+    }
+  ],
+  "autoReleaseAssets": false,
+  "locked": false,
+  "editorOnly": false
+}

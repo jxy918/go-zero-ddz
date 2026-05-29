@@ -1,0 +1,28 @@
+AI:
+  # 简单难度
+  Easy:
+    RememberCards: false
+    UseBomb: false
+    Strategy: "random"
+    ResponseRate: 0.5
+    DelayMsMin: 1000
+    DelayMsMax: 2000
+
+  # 普通难度
+  Normal:
+    RememberCards: false
+    UseBomb: true
+    Strategy: "minimum"
+    ResponseRate: 0.8
+    DelayMsMin: 800
+    DelayMsMax: 1500
+
+  # 困难难度
+  Hard:
+    RememberCards: true
+    UseBomb: true
+    Strategy: "optimal"
+    ResponseRate: 1.0
+    DelayMsMin: 500
+    DelayMsMax: 1000
+    CardInference: true

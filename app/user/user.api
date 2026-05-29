@@ -1,0 +1,63 @@
+syntax = "v1"
+
+info (
+	title:   "斗地主用户服务"
+	desc:    "用户登录、注册、信息查询"
+	author:  "go-zero-ddz"
+	email:   ""
+	version: "v1"
+)
+
+type (
+	RegisterReq {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Nickname string `json:"nickname,optional"`
+	}
+	RegisterResp {
+		Uid   string `json:"uid"`
+		Token string `json:"token"`
+	}
+	LoginReq {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	LoginResp {
+		Uid      string `json:"uid"`
+		Token    string `json:"token"`
+		Nickname string `json:"nickname"`
+		AvatarId uint32 `json:"avatar_id"`
+		Elo      int32  `json:"elo"`
+		Tier     string `json:"tier"`
+		Gold     int32  `json:"gold"`
+	}
+	UserInfoResp {
+		Uid      string `json:"uid"`
+		Nickname string `json:"nickname"`
+		AvatarId uint32 `json:"avatar_id"`
+		Elo      int32  `json:"elo"`
+		Tier     string `json:"tier"`
+		Gold     int32  `json:"gold"`
+		Wins     int32  `json:"wins"`
+		Losses   int32  `json:"losses"`
+	}
+)
+
+@server (
+	prefix: /user
+	jwt:    Auth
+)
+service user-api {
+	@doc "用户注册"
+	@handler register
+	post /register (RegisterReq) returns (RegisterResp)
+
+	@doc "用户登录"
+	@handler login
+	post /login (LoginReq) returns (LoginResp)
+
+	@doc "获取用户信息"
+	@handler userInfo
+	get /info returns (UserInfoResp)
+}
+

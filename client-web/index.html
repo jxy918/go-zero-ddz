@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>斗地主 - 在线游戏</title>
+    <link rel="stylesheet" href="css/style.css?v=3">
+</head>
+<body>
+    <!-- 登录界面 -->
+    <div id="login-screen" class="screen active">
+        <div class="login-container">
+            <h1>🃏 斗地主</h1>
+            <div class="tabs">
+                <button class="tab active" data-tab="login">登录</button>
+                <button class="tab" data-tab="register">注册</button>
+            </div>
+            
+            <form id="login-form" class="form active">
+                <input type="text" id="login-username" placeholder="用户名" required>
+                <input type="password" id="login-password" placeholder="密码" required>
+                <button type="submit" class="btn primary">登录</button>
+            </form>
+            
+            <form id="register-form" class="form">
+                <input type="text" id="register-username" placeholder="用户名" required>
+                <input type="password" id="register-password" placeholder="密码" required>
+                <input type="text" id="register-nickname" placeholder="昵称（可选）">
+                <button type="submit" class="btn primary">注册</button>
+            </form>
+            
+            <div id="login-message" class="message"></div>
+        </div>
+    </div>
+
+    <!-- 游戏大厅 -->
+    <div id="lobby-screen" class="screen">
+        <div class="lobby-container">
+            <div class="player-info">
+                <span id="player-nickname">玩家</span>
+                <span class="elo">ELO: <span id="player-elo">1000</span></span>
+                <button id="logout-btn" class="btn small">退出</button>
+            </div>
+            
+            <div class="lobby-actions">
+                <button id="create-room-btn" class="btn primary" onclick="debugCreateRoom()">创建房间</button>
+                <div class="join-room">
+                    <input type="text" id="room-id-input" placeholder="房间号">
+                    <button id="join-room-btn" class="btn">加入</button>
+                </div>
+            </div>
+            
+            <div id="lobby-message" class="message"></div>
+        </div>
+    </div>
+
+    <!-- 房间等待界面 -->
+    <div id="room-screen" class="screen">
+        <div class="room-container">
+            <div class="room-header">
+                <h2>房间: <span id="current-room-id">-</span></h2>
+                <button id="leave-room-btn" class="btn small">离开</button>
+            </div>
+            
+            <div class="players-list" id="players-list">
+                <!-- 玩家列表动态生成 -->
+            </div>
+            
+            <div id="bot-countdown" class="countdown hidden">
+                <span>等待玩家加入中... </span>
+                <span id="countdown-seconds">15</span>秒后人数不够机器人加入
+            </div>
+            
+            <button id="ready-btn" class="btn primary">准备</button>
+            <div id="room-message" class="message"></div>
+        </div>
+    </div>
+
+    <!-- 结算界面 -->
+    <div id="settlement-screen" class="screen">
+        <div class="settlement-container">
+            <h2 id="settlement-title">游戏结束</h2>
+            <div class="settlement-winner" id="settlement-winner">
+                <span id="winner-text">赢家</span>
+            </div>
+            <div class="settlement-details">
+                <div class="detail-row">
+                    <span class="label">基础分:</span>
+                    <span id="settlement-base-score">0</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">倍数:</span>
+                    <span id="settlement-multiplier">1</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">春天:</span>
+                    <span id="settlement-spring">否</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">反春:</span>
+                    <span id="settlement-counter-spring">否</span>
+                </div>
+            </div>
+            <div class="player-results" id="player-results">
+                <!-- 玩家结果动态生成 -->
+            </div>
+            <button id="back-to-lobby-btn" class="btn primary">返回大厅</button>
+        </div>
+    </div>
+
+    <!-- 游戏牌桌界面 -->
+    <div id="game-screen" class="screen">
+        <div class="game-container">
+            <!-- 顶部：对手信息 -->
+            <div class="opponents">
+                <div class="opponent left" id="opponent-left">
+                    <div class="player-name">玩家2</div>
+                    <div class="player-role"></div>
+                    <div class="card-count">手牌: <span>17</span></div>
+                    <div class="last-play" id="opponent-left-play"></div>
+                    <div class="timer-wrapper" id="timer-left-wrapper" style="display:none">
+                        <div class="timer-clock">
+                            <svg viewBox="0 0 36 36" class="circular-chart">
+                                <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                <path class="circle" stroke-dasharray="100, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                            </svg>
+                            <span class="timer-text">15</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="opponent right" id="opponent-right">
+                    <div class="player-name">玩家3</div>
+                    <div class="player-role"></div>
+                    <div class="card-count">手牌: <span>17</span></div>
+                    <div class="last-play" id="opponent-right-play"></div>
+                    <div class="timer-wrapper" id="timer-right-wrapper" style="display:none">
+                        <div class="timer-clock">
+                            <svg viewBox="0 0 36 36" class="circular-chart">
+                                <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                <path class="circle" stroke-dasharray="100, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                            </svg>
+                            <span class="timer-text">15</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 历史出牌记录 - 放在最上方 -->
+            <div class="history-panel-wrapper">
+                <div class="history-panel collapsed">
+                    <div class="history-header" id="history-header">
+                        <span class="history-title">出牌记录</span>
+                        <span class="history-stats">已出: <span id="total-played-count">0</span>/54</span>
+                        <button class="history-toggle" id="history-toggle">▶</button>
+                    </div>
+                    <div class="history-list" id="history-list">
+                        <!-- 历史记录动态生成 -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 中间：出牌区域 -->
+            <div class="play-area">
+                <div class="current-player-indicator" id="current-player">等待开始...</div>
+                
+                <!-- 底牌显示区域 -->
+                <div class="bottom-cards-area" id="bottom-cards-area" style="display: none;">
+                    <div class="bottom-cards-label">底牌:</div>
+                    <div class="bottom-cards" id="bottom-cards"></div>
+                </div>
+                
+                <div class="last-play-display" id="last-play-display">
+                    <div class="play-info">
+                        <span id="last-player">-</span> 出了
+                        <span id="last-cards">-</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 底部：我的手牌和操作按钮 -->
+            <div class="my-area">
+                <div class="my-info">
+                    <span id="my-role">农民</span>
+                    <span class="card-count">手牌: <span id="my-card-count">17</span></span>
+                    <div class="timer-wrapper" id="timer-me-wrapper" style="display:none">
+                        <div class="timer-clock">
+                            <svg viewBox="0 0 36 36" class="circular-chart">
+                                <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                <path class="circle" stroke-dasharray="100, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                            </svg>
+                            <span class="timer-text">15</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="my-cards" id="my-cards">
+                    <!-- 手牌动态生成 -->
+                </div>
+                
+                <div class="action-buttons">
+                    <button id="play-btn" class="btn primary" disabled>出牌</button>
+                    <button id="pass-btn" class="btn" disabled>不出</button>
+                    <button id="hint-btn" class="btn small">提示</button>
+                    <button id="cancel-ai-btn" class="btn small danger hidden">取消托管</button>
+                </div>
+            </div>
+            
+            <!-- 叫地主界面 -->
+            <div id="call-landlord-panel" class="panel hidden">
+                <h3>叫地主</h3>
+                <div class="call-buttons">
+                    <button class="btn call-btn" data-score="1">1分</button>
+                    <button class="btn call-btn" data-score="2">2分</button>
+                    <button class="btn call-btn" data-score="3">3分</button>
+                    <button class="btn" id="pass-call-btn">不叫</button>
+                </div>
+            </div>
+            
+            <div id="game-message" class="message"></div>
+        </div>
+    </div>
+
+    <script src="js/api.js?v=1"></script>
+    <script src="js/websocket.js?v=1"></script>
+    <script src="js/game.js?v=1"></script>
+    <script src="js/main.js?v=1"></script>
+    <script>
+        function debugCreateRoom() {
+            console.log('=== Debug Create Room ===');
+            console.log('Button clicked at:', new Date().toLocaleTimeString());
+            console.log('Game object exists:', typeof Game !== 'undefined');
+            console.log('Game:', Game);
+            console.log('Game.createRoom exists:', typeof Game !== 'undefined' && typeof Game.createRoom === 'function');
+            console.log('WS object exists:', typeof WS !== 'undefined');
+            console.log('WS.connected:', typeof WS !== 'undefined' && WS.connected);
+            console.log('WS.ws:', typeof WS !== 'undefined' ? WS.ws : 'undefined');
+            
+            if (typeof Game !== 'undefined' && typeof Game.createRoom === 'function') {
+                console.log('Calling Game.createRoom()...');
+                Game.createRoom();
+            } else {
+                console.error('Game.createRoom is not available!');
+            }
+        }
+    </script>
+</body>
+</html>

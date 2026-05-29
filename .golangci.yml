@@ -1,0 +1,214 @@
+# go-zero-ddz 代码质量配置
+# 文档: https://golangci-lint.run/usage/configuration/
+
+run:
+  # Go 版本
+  go: "1.25"
+
+  # 超时时间
+  timeout: 5m
+
+  # 包含哪些目录
+  include:
+    - "app/**"
+    - "pkg/**"
+
+  # 排除哪些目录
+  skip-dirs:
+    - "proto/ddzpb"
+    - "app/user-rpc"
+    - "bin"
+    - "logs"
+
+  # 排除测试文件
+  skip-files:
+    - ".*_test\\.go$"
+
+  # 允许全部 lint
+  allow-parallel-runners: true
+
+# 输出配置
+output:
+  format: "colored-line-number"
+  print-issued-lines: true
+  print-linter-name: true
+
+# 启用的 linter
+linters:
+  enable:
+    # 默认启用的所有 linter
+    - errcheck       # 检查未处理的 error
+    - gosimple       # 简化代码
+    - govet          # go vet
+    - ineffassign    # 检查无效赋值
+    - staticcheck    # 静态分析
+    - typecheck      # 类型检查
+    - unused         # 检查未使用代码
+    - asciicheck     # 检查非 ASCII 标识符
+    - bodyclose      # 检查 HTTP 响应体未关闭
+    - copyloopvar    # 检查循环变量复制问题
+    - dupl           # 重复代码检测
+    - durationcheck  # 检查 time.Duration 使用
+    - errname        # 错误命名规范
+    - errorlint      # 错误处理检查
+    - exhaustive     # switch 枚举检查
+    - exportloopref  # 检查导出循环引用
+    - goconst        # 检查可定义为 const 的字符串
+    - gocritic       # 代码风格检查
+    - gofmt          # go fmt 检查
+    - goimports      # 导入排序检查
+    - gosec          # 安全扫描
+    - loggercheck    # 日志参数检查
+    - misspell       # 拼写检查
+    - nakedret       # 检查裸返回值
+    - nilerr         # 检查返回 nil error 但有内容
+    - noctx          # 检查未传递 context
+    - prealloc       # 预分配切片建议
+    - predeclared    # 检查与预声明标识符重名
+    - revive         # golint 替代
+    - rowserrcheck   # 检查 sql.Rows 错误处理
+    - sqlclosecheck  # 检查 sql.Rows/Stmt 未关闭
+    - tenv           # 检查 test 中 os.Setenv 使用
+    - unconvert      # 检查不必要的类型转换
+    - unparam        # 检查未使用的参数
+    - usestdlibvars  # 建议使用标准库常量
+    - wastedassign   # 检查浪费的赋值
+
+  # 禁用
+  disable:
+    - funlen         # 函数长度限制（过于严格）
+    - gochecknoglobals  # 全局变量检查（过于严格）
+    - gochecknoinits    # init 函数检查
+    - lll             # 行长度限制
+    - wsl             # 空行风格
+    - nlreturn        # return 前空行
+    - cyclop          # 圈复杂度（go-cogn复杂度替代）
+    - tagliatelle     # tag 命名规范
+
+# 具体 linter 配置
+linters-settings:
+  # gofmt
+  gofmt:
+    simplify: true
+
+  # goimports
+  goimports:
+    local-prefixes: go-zero-ddz
+
+  # misspell
+  misspell:
+    locale: US
+    ignore-words:
+      - "ddz"
+
+  # goconst
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+  # gocritic
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+    disabled-checks:
+      - paramTypeCombine
+      - unnamedResult
+
+  # revive
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+      - name: blank-imports
+        severity: warning
+      - name: context-as-argument
+        severity: warning
+      - name: context-keys-type
+        severity: warning
+      - name: dot-imports
+        severity: warning
+      - name: error-return
+        severity: warning
+      - name: error-strings
+        severity: warning
+      - name: error-naming
+        severity: warning
+      - name: if-return
+        severity: warning
+      - name: increment-decrement
+        severity: warning
+      - name: var-naming
+        severity: warning
+      - name: var-declaration
+        severity: warning
+      - name: package-comments
+        severity: warning
+      - name: range
+        severity: warning
+      - name: receiver-naming
+        severity: warning
+      - name: time-naming
+        severity: warning
+      - name: unexported-return
+        severity: warning
+      - name: indent-error-flow
+        severity: warning
+      - name: errorf
+        severity: warning
+      - name: empty-block
+        severity: warning
+      - name: superfluous-else
+        severity: warning
+      - name: unused-parameter
+        severity: warning
+      - name: unreachable-code
+        severity: warning
+      - name: redefines-builtin-id
+        severity: warning
+
+  # gosec
+  gosec:
+    excludes:
+      - G101  # 硬编码凭据（项目中有 JWT Secret）
+      - G204  # 命令注入
+      - G304  # 文件路径注入
+      - G402  # TLS 检查
+      - G404  # 不安全随机数
+
+  # errcheck
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    ignore: "fmt:Fprintf|io:Copy|http:Write|Close|Flush"
+
+  # prealloc
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: true
+
+# issue 排除规则
+issues:
+  exclude-rules:
+    # 测试文件允许裸返回值
+    - path: "_test\\.go$"
+      linters:
+        - errcheck
+        - gosec
+
+    # handler 文件由 goctl 生成，允许部分检查跳过
+    - path: "app/user/internal/handler/"
+      linters:
+        - errcheck
+        - gosec
+
+    # 生成的 types 文件
+    - path: "app/user/internal/types/"
+      linters:
+        - all
+
+  # 最大 issue 数（0 表示不限制）
+  max-issues-per-linter: 0
+  max-same-issues: 0

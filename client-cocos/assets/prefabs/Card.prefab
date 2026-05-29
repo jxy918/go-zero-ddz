@@ -1,0 +1,94 @@
+{
+  "__type__": "cc.Prefab",
+  "data": {
+    "__type__": "cc.Node",
+    "name": "Card",
+    "active": true,
+    "isStatic": false,
+    "layer": 1,
+    "width": 60,
+    "height": 90,
+    "components": [
+      {
+        "__type__": "cc.Sprite",
+        "spriteFrame": null,
+        "type": 0
+      },
+      {
+        "__type__": "cc.Button",
+        "transition": 2,
+        "normalColor": { "r": 1, "g": 1, "b": 1, "a": 1 },
+        "pressedColor": { "r": 0.8, "g": 0.8, "b": 0.8, "a": 1 },
+        "hoverColor": { "r": 1, "g": 1, "b": 1, "a": 1 }
+      }
+    ],
+    "children": [
+      {
+        "__type__": "cc.Node",
+        "name": "Value",
+        "active": true,
+        "isStatic": false,
+        "layer": 1,
+        "width": 30,
+        "height": 30,
+        "x": -15,
+        "y": 25,
+        "components": [
+          {
+            "__type__": "cc.Label",
+            "string": "A",
+            "fontSize": 24,
+            "fontFamily": "Arial",
+            "horizontalAlign": 0,
+            "verticalAlign": 1,
+            "color": { "r": 31, "g": 41, "b": 55, "a": 1 }
+          }
+        ]
+      },
+      {
+        "__type__": "cc.Node",
+        "name": "Suit",
+        "active": true,
+        "isStatic": false,
+        "layer": 1,
+        "width": 30,
+        "height": 30,
+        "x": -15,
+        "y": 5,
+        "components": [
+          {
+            "__type__": "cc.Label",
+            "string": "♠",
+            "fontSize": 24,
+            "fontFamily": "Arial",
+            "horizontalAlign": 0,
+            "verticalAlign": 1,
+            "color": { "r": 31, "g": 41, "b": 55, "a": 1 }
+          }
+        ]
+      },
+      {
+        "__type__": "cc.Node",
+        "name": "CenterSuit",
+        "active": true,
+        "isStatic": false,
+        "layer": 1,
+        "width": 40,
+        "height": 40,
+        "components": [
+          {
+            "__type__": "cc.Label",
+            "string": "♠",
+            "fontSize": 40,
+            "fontFamily": "Arial",
+            "horizontalAlign": 1,
+            "verticalAlign": 1,
+            "color": { "r": 31, "g": 41, "b": 55, "a": 1 }
+          }
+        ]
+      }
+    ]
+  },
+  "instantiate": true,
+  "editorOnly": false
+}

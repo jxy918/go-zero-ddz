@@ -1,0 +1,68 @@
+Name: game-service
+Host: 0.0.0.0
+Port: 8080
+InstanceId: ""
+
+Cluster:
+  Enabled: true
+  InstanceId: ""
+  Host: "${POD_IP}"
+  Port: 8080
+
+Redis:
+  Host: ""
+  Type: cluster
+  Pass: "${REDIS_PASSWORD}"
+  Tls: true
+  ClusterNodes:
+    - redis-cluster-0.redis-cluster:6379
+    - redis-cluster-1.redis-cluster:6379
+    - redis-cluster-2.redis-cluster:6379
+    - redis-cluster-3.redis-cluster:6379
+    - redis-cluster-4.redis-cluster:6379
+    - redis-cluster-5.redis-cluster:6379
+  SentinelMaster: ""
+  SentinelNodes: []
+
+WebSocket:
+  ReadBufferSize: 4096
+  WriteBufferSize: 4096
+  HandshakeTimeout: 10
+  PingPeriod: 30
+  PongWait: 60
+  MaxMessageSize: 65536
+  WriteWait: 10
+
+Room:
+  MaxRooms: 10000
+  MaxPlayersPerRoom: 3
+  ReadyTimeout: 60
+  PlayTimeout: 15
+  ReconnectTimeout: 300
+  SnapshotInterval: 10
+
+Match:
+  Enabled: true
+  ScanInterval: 2
+  RandomTimeout: 15
+  RankedTimeout: 30
+  EloRange: 100
+  BotFillTimeout: 30
+
+AI:
+  Enabled: true
+  DefaultDifficulty: "normal"
+  AutoEnableTimeout: 30
+  PlayDelayMin: 500
+  PlayDelayMax: 2000
+
+Log:
+  Mode: file
+  Path: logs/
+  Level: info
+  Compress: true
+  KeepDays: 30
+
+Metrics:
+  Enabled: true
+  Path: /metrics

@@ -1,0 +1,19 @@
+Name: user-api
+Host: 0.0.0.0
+Port: 8888
+
+Auth:
+  AccessSecret: "ddz-secret-key-2025"
+  AccessExpire: 86400
+
+Redis:
+  Host: localhost:6379
+  Type: node
+  Pass: "123456"
+
+MySQL:
+  DSN: root:root@tcp(127.0.0.1:3306)/ddz?charset=utf8mb4&parseTime=True&loc=Local
+
+Log:
+  Mode: console
+  Level: debug
