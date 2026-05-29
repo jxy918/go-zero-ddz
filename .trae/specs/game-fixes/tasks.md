@@ -1,6 +1,6 @@
 # 任务清单
 
-## [ ] 任务1：检查并修复后端叫地主广播
+## [x] 任务1：检查并修复后端叫地主广播
 - **Priority**: P0
 - **Depends On**: None
 - **Description**: 
@@ -25,7 +25,7 @@
   - `human-judgement`: 测试前端是否正确显示叫地主广播消息
 - **Notes**: 需要修改前端消息处理逻辑
 
-## [ ] 任务3：修复用户被托管问题
+## [x] 任务3：修复用户被托管问题
 - **Priority**: P0
 - **Depends On**: Tasks 1, 2
 - **Description**: 

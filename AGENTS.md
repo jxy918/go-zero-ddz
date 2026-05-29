@@ -18,7 +18,7 @@
 | 包 | 路径 | 说明 |
 |----|------|------|
 | `pkg/cardutil/` | 牌型库 | 30+ 测试用例，独立可测试 |
-| `pkg/redisutil/` | Redis 工具 | （预留） |
+| `pkg/types/` | 类型定义 | 共享常量、枚举、结构体定义 |
 
 ### 数据流
 
@@ -114,17 +114,19 @@ go-zero-ddz/
 │   │   └── internal/
 │   │       ├── config/config.go          #   配置结构体（自定义 LoadConfig）
 │   │       ├── ai/                       #   AI 出牌引擎
-│   │       │   ├── engine.go            #   决策引擎
-│   │       │   ├── counter.go           #   记牌器
-│   │       │   ├── strategy.go          #   策略
-│   │       │   ├── rules.go             #   规则
-│   │       │   └── bot.go               #   机器人管理
+│   │       │   ├── engine.go             #   决策引擎
+│   │       │   ├── counter.go            #   记牌器
+│   │       │   ├── strategy.go           #   策略
+│   │       │   ├── rules.go              #   规则
+│   │       │   └── bot.go                #   机器人管理
 │   │       ├── cluster/                  #   多实例集群
-│   │       │   ├── registry.go          #   实例注册/心跳
-│   │       │   ├── router.go            #   玩家路由
-│   │       │   └── message_bus.go       #   Redis Pub/Sub
+│   │       │   ├── registry.go           #   实例注册/心跳
+│   │       │   ├── router.go             #   玩家路由
+│   │       │   └── message_bus.go        #   Redis Pub/Sub
 │   │       ├── game/                     #   游戏核心逻辑
-│   │       ├── handler/handler.go        #   WS 消息处理器
+│   │       │   ├── call.go               #   叫地主逻辑
+│   │       │   └── settlement.go         #   结算逻辑
+│   │       ├── handler/handler.go         #   WS 消息处理器
 │   │       ├── match/                    #   匹配系统
 │   │       │   ├── coordinator.go
 │   │       │   ├── queue.go
@@ -134,16 +136,24 @@ go-zero-ddz/
 │   │       │   ├── room.go
 │   │       │   └── state.go
 │   │       ├── svc/service_context.go    #   服务上下文
-│   │       └── websocket/               #   WS 连接管理
-│   │           ├── hub.go               #   连接中心
-│   │           ├── client.go            #   客户端
-│   │           └── codec.go             #   消息编解码
+│   │       └── websocket/                #   WS 连接管理
+│   │           ├── hub.go                #   连接中心
+│   │           ├── client.go             #   客户端
+│   │           └── codec.go              #   消息编解码
 │   │
 │   └── user-rpc/                         # 预留 gRPC 服务
 │
 ├── pkg/                                  # 共享库
 │   ├── cardutil/                         # 牌型判定（独立可测试）
-│   └── redisutil/                        # Redis 工具（预留）
+│   │   ├── card.go                       #   牌定义
+│   │   ├── pattern.go                    #   牌型分析
+│   │   ├── compare.go                    #   牌型比较
+│   │   ├── deck.go                       #   牌组管理
+│   │   └── pattern_test.go               #   单元测试（30+ 用例）
+│   └── types/                            # 类型定义（共享常量与结构体）
+│       ├── message.go                    #   消息ID常量
+│       ├── game.go                       #   游戏状态、角色、常量
+│       └── types.go                      #   通用结构体
 │
 ├── proto/                                # Protobuf 定义
 │   ├── common.proto                      # 公共类型
@@ -177,6 +187,7 @@ go-zero-ddz/
 | `app/user/internal/handler/routes.go` | ⚠️ 生成后需手动 | 重新生成后需恢复路由分离 |
 | `app/game/internal/` | ✅ 全部手写 | 无代码生成 |
 | `pkg/cardutil/` | ✅ 手动 | 独立可测试库 |
+| `pkg/types/` | ✅ 手动 | 共享类型定义，所有模块引用 |
 
 ---
 
@@ -190,7 +201,7 @@ go-zero-ddz/
 - **命名**:
   - 接口: `-er` 后缀（`Reader`、`Handler`）
   - 错误: 以 `Err` 前缀（`var ErrNotFound = errors.New(...)`）
-  - 包名: 全小写，单数，无下划线（`cardutil`、`websocket`）
+  - 包名: 全小写，单数，无下划线（`cardutil`、`types`）
 - **错误处理**: 永远不要 `_ =` 忽略错误；业务错误用 `errors.New()`，系统错误用 `fmt.Errorf("context: %w", err)`
 
 ### 4.2 项目特有约定
@@ -229,7 +240,14 @@ go-zero-ddz/
 - AI 引擎必须实现 `easy/normal/hard` 三种难度
 - 超时机制：15 秒不出牌 → AI 自动托管
 
-### 4.5 日志规范
+### 4.5 pkg/types 使用规范
+
+- **优先引用**: 所有模块应从 `pkg/types` 引用共享常量和结构体
+- **禁止重复定义**: 禁止在各模块中重复定义相同的常量或结构体
+- **类型安全**: 使用强类型定义，避免使用 `int` 替代枚举类型
+- **新增类型**: 新增的共享类型应添加到 `pkg/types/` 目录下的对应文件
+
+### 4.6 日志规范
 
 - **user-api**: 使用 `logx.Logger`（嵌入 Logic 结构体）
 - **game-service**: 使用 `log` 标准库（后续迁移到 `logx`）
@@ -241,7 +259,7 @@ go-zero-ddz/
   - AI 托管触发
   - 异常/错误
 
-### 4.6 错误码体系
+### 4.7 错误码体系
 
 | 范围 | 模块 | HTTP 状态码 |
 |------|------|------------|
@@ -333,6 +351,7 @@ Redis ZSet: ddz:match:queue:*
 - `user-api`
 - `game`
 - `cardutil`
+- `types`
 - `cluster`
 - `match`
 - `room`
@@ -394,8 +413,16 @@ docs/*      ← 文档分支（可绕过 dev 直接合入 main）
 - [ ] WebSocket 连接正确注册/注销
 - [ ] AI 托管不会导致死循环
 - [ ] 跨实例消息不会重复处理
+- [ ] 正确引用 `pkg/types` 中的常量和结构体
 
-### 7.4 安全审查
+### 7.4 pkg/types 专项
+
+- [ ] 无重复定义（检查是否已有相同类型）
+- [ ] 类型命名清晰、语义明确
+- [ ] 常量值合理、无冲突
+- [ ] 结构体字段命名规范
+
+### 7.5 安全审查
 
 - [ ] 用户输入已校验（SQL 注入、XSS）
 - [ ] JWT Secret 未硬编码在生产配置中
@@ -490,5 +517,6 @@ SIGTERM → 停止接收新连接 → 状态改为 draining
 | 4 | **MySQL DSN 格式** | `user:pass@tcp(host:port)/dbname?parseTime=true&loc=Local` |
 | 5 | **game-service 配置** | 使用自定义 `config.LoadConfig()`，不是 go-zero 的 `conf.MustLoad()` |
 | 6 | **状态机重复创建** | `NewGameStateMachine()` 每次调用都创建新实例，应在 Room 中持有引用 |
-| 7 | **不再使用** | redisutil 目录为空，已弃用的包应及时清理 |
-| 8 | **Dockerfile Go 版本** | 当前使用 `golang:1.22-alpine`，需更新为 `go.mod` 的 1.25.1 |
+| 7 | **类型重复定义** | 应从 `pkg/types` 引用，不要在各模块中重复定义 |
+| 8 | **IsAIControlled 状态** | 进入出牌阶段前必须重置非机器人玩家的 `IsAIControlled` 为 `false` |
+| 9 | **Dockerfile Go 版本** | 当前使用 `golang:1.22-alpine`，需更新为 `go.mod` 的 1.25.1 |

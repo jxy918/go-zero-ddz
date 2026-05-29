@@ -6,50 +6,13 @@ import (
 	"time"
 
 	"go-zero-ddz/pkg/cardutil"
+	"go-zero-ddz/pkg/types"
 )
-
-// SettlementResult 结算结果
-type SettlementResult struct {
-	WinnerUID       string
-	WinnerSide      WinnerSide
-	IsSpring        bool
-	IsCounterSpring bool
-	Multiplier      int32
-	BaseScore       int32
-	PlayerResults   map[string]*PlayerSettlement
-}
-
-// WinnerSide 获胜方
-type WinnerSide int
-
-const (
-	WinnerSideLandlord WinnerSide = 0
-	WinnerSidePeasant  WinnerSide = 1
-)
-
-// PlayerSettlement 玩家结算
-type PlayerSettlement struct {
-	UID         string
-	IsLandlord  bool
-	IsBot       bool
-	ScoreChange int32
-	NewELO      int32
-	NewTier     string
-	IsPromoted  bool
-	IsDemoted   bool
-}
-
-// CallRecord 叫地主记录
-type CallRecord struct {
-	UID    string
-	Action int   // 0=pass, 1=call
-	Score  int32 // 1-3
-}
 
 // GameStateMachine 游戏状态机
 type GameStateMachine struct {
 	room           *Room
-	callRecords    []CallRecord
+	callRecords    []types.CallRecord
 	callCount      int // 已叫人数
 	currentCallIdx int // 当前叫地主的玩家索引
 	callRound      int // 当前叫地主轮次（1-3轮）
@@ -60,7 +23,7 @@ type GameStateMachine struct {
 func NewGameStateMachine(room *Room) *GameStateMachine {
 	return &GameStateMachine{
 		room:        room,
-		callRecords: make([]CallRecord, 0, 3),
+		callRecords: make([]types.CallRecord, 0, 3),
 	}
 }
 
@@ -86,7 +49,7 @@ func (gsm *GameStateMachine) DealCards() ([][]cardutil.Card, []cardutil.Card, er
 	gsm.room.mu.Lock()
 	gsm.room.BottomCards = bottomCards
 	gsm.room.mu.Unlock()
-	gsm.room.SetState(StateCalling)
+	gsm.room.SetState(types.StateCalling)
 
 	// 初始化叫地主索引，从第一个玩家开始
 	gsm.currentCallIdx = 0
@@ -104,12 +67,12 @@ func (gsm *GameStateMachine) CallLandlord(uid string, action int, score int32) e
 		return fmt.Errorf("player not found")
 	}
 
-	if gsm.room.State != StateCalling {
+	if gsm.room.State != types.StateCalling {
 		return fmt.Errorf("not in calling state")
 	}
 
 	// 记录叫分
-	record := CallRecord{UID: uid, Action: action, Score: score}
+	record := types.CallRecord{UID: uid, Action: action, Score: score}
 	gsm.callRecords = append(gsm.callRecords, record)
 	gsm.callCount++
 
@@ -201,14 +164,14 @@ func (gsm *GameStateMachine) ConfirmLandlord() error {
 		return fmt.Errorf("landlord not found")
 	}
 	landlord.IsLandlord = true
-	landlord.Role = RoleLandlord
+	landlord.Role = types.RoleLandlord
 	log.Printf("Room %s: set landlord: %s, is_bot=%v", gsm.room.ID, gsm.room.LandlordUID, landlord.IsBot)
 
 	// 设置农民
 	for _, uid := range gsm.room.PlayerIDs {
 		if uid != gsm.room.LandlordUID {
 			if p, exists := gsm.room.Players[uid]; exists {
-				p.Role = RolePeasant
+				p.Role = types.RolePeasant
 			}
 		}
 	}
@@ -241,12 +204,12 @@ func (gsm *GameStateMachine) ConfirmLandlord() error {
 			log.Printf("Room %s: landlord %s received bottom cards, total cards: %d", roomID, landlordUID, len(landlord.Cards))
 		}
 		// 现在切换到出牌状态
-		gsm.room.State = StatePlaying
+		gsm.room.State = types.StatePlaying
 		gsm.room.mu.Unlock()
 
 		// 调用状态变更回调
 		if gsm.room.OnStateChange != nil {
-			gsm.room.OnStateChange(gsm.room, oldState, StatePlaying)
+			gsm.room.OnStateChange(gsm.room, oldState, types.StatePlaying)
 		}
 	})
 
@@ -258,7 +221,7 @@ func (gsm *GameStateMachine) PlayCards(uid string, cards []cardutil.Card) (*card
 	gsm.room.mu.Lock()
 	defer gsm.room.mu.Unlock()
 
-	if gsm.room.State != StatePlaying {
+	if gsm.room.State != types.StatePlaying {
 		return nil, false, fmt.Errorf("not in playing state")
 	}
 
@@ -280,7 +243,7 @@ func (gsm *GameStateMachine) PlayCards(uid string, cards []cardutil.Card) (*card
 		if gsm.room.PassCount >= 2 {
 			gsm.room.PassCount = 0
 			gsm.room.CurrentTurnUID = lastPlayedUID
-			gsm.room.LastPlayedUID = ""       // 重置上一手出牌记录，表示新轮次
+			gsm.room.LastPlayedUID = "" // 重置上一手出牌记录，表示新轮次
 			gsm.room.LastPlayedCards = nil
 			gsm.room.LastPattern = cardutil.PatternUnknown
 			// 设置一个标记，表示连续 PASS，需要特殊处理
@@ -328,7 +291,7 @@ func (gsm *GameStateMachine) PlayCards(uid string, cards []cardutil.Card) (*card
 	gsm.room.LastPlayedUID = uid
 	gsm.room.LastPattern = result.Pattern
 	gsm.room.PassCount = 0
-	gsm.room.IsLastRound = false  // 清除连续PASS标记，因为有玩家出了牌
+	gsm.room.IsLastRound = false // 清除连续PASS标记，因为有玩家出了牌
 
 	// 检查炸弹，增加倍数
 	if result.Pattern.IsBomb() {
@@ -338,7 +301,7 @@ func (gsm *GameStateMachine) PlayCards(uid string, cards []cardutil.Card) (*card
 	// 检查是否出完（胜利）
 	if len(player.Cards) == 0 {
 		// 使用 setStateLocked 避免死锁（已持有 room.mu.Lock）
-		gsm.room.setStateLocked(StateSettlement)
+		gsm.room.setStateLocked(types.StateSettlement)
 		gsm.room.StopTimer()
 		log.Printf("Room %s: player %s wins! (played %d cards, pattern=%s)", gsm.room.ID, uid, len(cards), result.Pattern)
 		return &result, true, nil
@@ -364,12 +327,12 @@ func (gsm *GameStateMachine) NextTurnAfterPlay() string {
 }
 
 // CalculateSettlement 计算结算结果
-func (gsm *GameStateMachine) CalculateSettlement() *SettlementResult {
+func (gsm *GameStateMachine) CalculateSettlement() *types.SettlementResult {
 	gsm.room.mu.RLock()
 	defer gsm.room.mu.RUnlock()
 
-	result := &SettlementResult{
-		PlayerResults: make(map[string]*PlayerSettlement),
+	result := &types.SettlementResult{
+		PlayerResults: make(map[string]*types.PlayerSettlement),
 		BaseScore:     gsm.room.BaseScore,
 		Multiplier:    gsm.room.Multiplier,
 	}
@@ -391,9 +354,9 @@ func (gsm *GameStateMachine) CalculateSettlement() *SettlementResult {
 	}
 
 	if winner.IsLandlord {
-		result.WinnerSide = WinnerSideLandlord
+		result.WinnerSide = types.WinnerSideLandlord
 	} else {
-		result.WinnerSide = WinnerSidePeasant
+		result.WinnerSide = types.WinnerSidePeasant
 	}
 
 	// 春天/反春判定
@@ -408,13 +371,13 @@ func (gsm *GameStateMachine) CalculateSettlement() *SettlementResult {
 	totalScore := result.BaseScore * result.Multiplier
 
 	for uid, p := range gsm.room.Players {
-		ps := &PlayerSettlement{
+		ps := &types.PlayerSettlement{
 			UID:        uid,
 			IsLandlord: p.IsLandlord,
 			IsBot:      p.IsBot,
 		}
 
-		if result.WinnerSide == WinnerSideLandlord {
+		if result.WinnerSide == types.WinnerSideLandlord {
 			// 地主赢
 			if p.IsLandlord {
 				ps.ScoreChange = totalScore * 2 // 地主赢双倍
