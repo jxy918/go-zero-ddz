@@ -14,6 +14,7 @@ import (
 	"go-zero-ddz/app/game/internal/ai"
 	"go-zero-ddz/app/game/internal/websocket"
 	"go-zero-ddz/pkg/cardutil"
+	"go-zero-ddz/pkg/types"
 )
 
 // Manager 房间管理器
@@ -150,11 +151,11 @@ func (m *Manager) GetRoomCount() int {
 }
 
 // onStateChange 状态变更回调
-func (m *Manager) onStateChange(room *Room, oldState, newState RoomState) {
+func (m *Manager) onStateChange(room *Room, oldState, newState types.RoomState) {
 	log.Printf("Room %s state changed: %v → %v", room.ID, oldState, newState)
 
 	// 如果游戏开始，停止机器人加入计时器
-	if newState != StateWaiting {
+	if newState != types.StateWaiting {
 		log.Printf("Room %s game started, stopping bot join timer", room.ID)
 		room.StopBotJoinTimer()
 	}
@@ -164,15 +165,15 @@ func (m *Manager) onStateChange(room *Room, oldState, newState RoomState) {
 
 	// 根据状态执行相应逻辑
 	switch newState {
-	case StateDealing:
+	case types.StateDealing:
 		// 开始发牌
-	case StateCalling:
+	case types.StateCalling:
 		// 开始叫地主，启动倒计时
 		m.startCallTimer(room)
-	case StatePlaying:
+	case types.StatePlaying:
 		// 开始出牌，启动倒计时
 		m.startPlayTimer(room)
-	case StateSettlement:
+	case types.StateSettlement:
 		// 结算
 		room.StopTimer()
 	}
@@ -203,7 +204,7 @@ func (m *Manager) onBotJoinTimeout(room *Room) {
 		log.Printf("Room %s: checking state without lock - Players len=%d, State=%v", room.ID, len(room.Players), room.State)
 
 		// 如果游戏已经开始，直接返回
-		if room.State != StateWaiting {
+		if room.State != types.StateWaiting {
 			log.Printf("Room %s: game already started (state=%v), not adding bots", room.ID, room.State)
 			return
 		}
@@ -231,7 +232,7 @@ func (m *Manager) onBotJoinTimeout(room *Room) {
 				IsOnline:       true,
 				IsLandlord:     false,
 				IsAIControlled: false,
-				Role:           RolePeasant,
+				Role:           types.RolePeasant,
 			}
 
 			// 直接添加（不加锁！）
@@ -271,7 +272,7 @@ func (m *Manager) checkStartGame(room *Room) {
 
 	log.Printf("Room %s: checkStartGame result: allReady=%v playerCount=%d state=%v", room.ID, allReady, playerCount, state)
 
-	if allReady && playerCount >= 3 && state == StateWaiting {
+	if allReady && playerCount >= 3 && state == types.StateWaiting {
 		log.Printf("Room %s all players ready and full, starting game", room.ID)
 		// 停止机器人加入计时器
 		room.StopBotJoinTimer()
@@ -297,7 +298,7 @@ func (m *Manager) PlayerJoined(room *Room, uid string) {
 	playerCount := len(room.Players)
 	room.mu.RUnlock()
 
-	if state != StateWaiting {
+	if state != types.StateWaiting {
 		log.Printf("Room %s not in waiting state, not restarting timer", room.ID)
 		return
 	}
@@ -336,7 +337,7 @@ func (m *Manager) PlayerReady(room *Room, uid string) {
 	room.mu.RUnlock()
 
 	// 如果所有已加入的玩家都准备好了，但人数不足3人
-	if allJoinedReady && playerCount < 3 && state == StateWaiting {
+	if allJoinedReady && playerCount < 3 && state == types.StateWaiting {
 		log.Printf("Room %s: all joined players ready but only %d/3 players, starting bot join timer", room.ID, playerCount)
 
 		timeout := m.config.BotJoinTimeout
@@ -382,10 +383,10 @@ func (m *Manager) TriggerBotIfNeeded(room *Room) {
 
 		log.Printf("TriggerBotIfNeeded: actual state=%d, actualUID=%s", actualState, actualUID)
 
-		if actualState == StateCalling {
+		if actualState == types.StateCalling {
 			log.Printf("TriggerBotIfNeeded: calling botCallLandlord")
 			m.botCallLandlord(room, currentUID)
-		} else if actualState == StatePlaying {
+		} else if actualState == types.StatePlaying {
 			log.Printf("TriggerBotIfNeeded: calling onTimeout")
 			m.onTimeout(room, currentUID)
 		} else {
@@ -409,9 +410,9 @@ func (m *Manager) triggerBotIfNeededLocked(room *Room) {
 		currentState := room.State
 		room.mu.RUnlock()
 
-		if currentState == StateCalling {
+		if currentState == types.StateCalling {
 			m.botCallLandlord(room, currentUID)
-		} else if currentState == StatePlaying {
+		} else if currentState == types.StatePlaying {
 			m.onTimeout(room, currentUID)
 		}
 	})
@@ -530,6 +531,18 @@ func (m *Manager) botCallLandlord(room *Room, uid string) {
 		cardCounts := room.GetCardCounts()
 		room.mu.RUnlock()
 
+		// 重置所有非机器人玩家的 IsAIControlled 状态
+		log.Printf("Room %s: resetting IsAIControlled for all non-bot players before starting play phase", room.ID)
+		room.mu.Lock()
+		for _, uid := range room.PlayerIDs {
+			if p, exists := room.Players[uid]; exists && !p.IsBot {
+				log.Printf("Room %s: player %s IsAIControlled before reset: %v", room.ID, uid, p.IsAIControlled)
+				p.IsAIControlled = false
+				log.Printf("Room %s: player %s reset IsAIControlled to false", room.ID, uid)
+			}
+		}
+		room.mu.Unlock()
+
 		// 给地主发送带底牌的手牌
 		if landlord, exists := room.GetPlayer(landlordUID); exists {
 			landlordClient := m.hub.GetClientByUID(landlord.UID)
@@ -552,7 +565,7 @@ func (m *Manager) botCallLandlord(room *Room, uid string) {
 		}
 
 		// 启动地主的出牌计时器
-		room.SetState(StatePlaying)
+		room.SetState(types.StatePlaying)
 		room.CurrentTurnUID = landlordUID
 		room.StartTimer(m.config.PlayTimeout, landlordUID)
 
@@ -588,7 +601,7 @@ func (m *Manager) onTimeout(room *Room, uid string) {
 		log.Printf("Player %s not found in room %s", uid, room.ID)
 		return
 	}
-	isCallPhase := room.State == StateCalling
+	isCallPhase := room.State == types.StateCalling
 	isBot := player.IsBot
 	room.mu.RUnlock()
 
@@ -639,9 +652,9 @@ func (m *Manager) onTimeout(room *Room, uid string) {
 
 	// 设置角色
 	if landlordUID == uid {
-		ctx.MyRole = ai.RoleLandlord
+		ctx.MyRole = types.RoleLandlord
 	} else {
-		ctx.MyRole = ai.RolePeasant
+		ctx.MyRole = types.RolePeasant
 	}
 
 	// AI 决策
@@ -706,7 +719,7 @@ func (m *Manager) onTimeout(room *Room, uid string) {
 			if gsm != nil {
 				result := gsm.CalculateSettlement()
 				winnerSide := "landlord"
-				if result.WinnerSide == WinnerSidePeasant {
+				if result.WinnerSide == types.WinnerSidePeasant {
 					winnerSide = "peasant"
 				}
 				payload := []byte(fmt.Sprintf(`{"winner_uid":"%s","winner_side":"%s","base_score":%d,"multiplier":%d}`,

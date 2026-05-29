@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go-zero-ddz/pkg/cardutil"
+	"go-zero-ddz/pkg/types"
 )
 
 // GenerateID 生成房间 ID
@@ -28,34 +29,14 @@ type Player struct {
 	IsLandlord     bool
 	IsAIControlled bool
 	Cards          []cardutil.Card
-	Role           PlayerRole
+	Role           types.PlayerRole
 	DisconnectAt   time.Time // 断线时间
 }
-
-// PlayerRole 玩家角色
-type PlayerRole int
-
-const (
-	RoleUnknown  PlayerRole = 0
-	RoleLandlord PlayerRole = 1 // 地主
-	RolePeasant  PlayerRole = 2 // 农民
-)
-
-// RoomState 房间状态
-type RoomState int
-
-const (
-	StateWaiting    RoomState = 0 // 等待中
-	StateDealing    RoomState = 1 // 发牌中
-	StateCalling    RoomState = 2 // 叫地主中
-	StatePlaying    RoomState = 3 // 出牌中
-	StateSettlement RoomState = 4 // 结算中
-)
 
 // Room 房间
 type Room struct {
 	ID        string
-	State     RoomState
+	State     types.RoomState
 	Players   map[string]*Player // UID → Player
 	PlayerIDs []string           // 玩家顺序（用于回合计算）
 
@@ -84,7 +65,7 @@ type Room struct {
 	botJoinCancel context.CancelFunc
 
 	// 回调
-	OnStateChange      func(room *Room, oldState, newState RoomState)
+	OnStateChange      func(room *Room, oldState, newState types.RoomState)
 	OnTimeout          func(room *Room, uid string)
 	OnBotJoinTimeout   func(room *Room)              // 机器人加入超时回调
 	OnBotJoinCountdown func(room *Room, seconds int) // 机器人加入倒计时回调
@@ -99,7 +80,7 @@ type Room struct {
 func NewRoom(id string) *Room {
 	return &Room{
 		ID:         id,
-		State:      StateWaiting,
+		State:      types.StateWaiting,
 		Players:    make(map[string]*Player),
 		PlayerIDs:  make([]string, 0, 3),
 		BaseScore:  1,
@@ -208,7 +189,7 @@ func (r *Room) ResetPlayersState() {
 		player.IsLandlord = false
 		player.IsAIControlled = false
 		player.Cards = nil
-		player.Role = RoleUnknown
+		player.Role = types.RoleUnknown
 	}
 	log.Printf("Room %s: all players state reset", r.ID)
 }
@@ -373,7 +354,7 @@ func (r *Room) StopBotJoinTimer() {
 }
 
 // SetState 设置房间状态（外部调用，需要加锁）
-func (r *Room) SetState(newState RoomState) {
+func (r *Room) SetState(newState types.RoomState) {
 	r.mu.Lock()
 	oldState := r.State
 	r.State = newState
@@ -385,7 +366,7 @@ func (r *Room) SetState(newState RoomState) {
 }
 
 // setStateLocked 设置房间状态（内部调用，假设已持有锁）
-func (r *Room) setStateLocked(newState RoomState) RoomState {
+func (r *Room) setStateLocked(newState types.RoomState) types.RoomState {
 	oldState := r.State
 	r.State = newState
 	return oldState

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"go-zero-ddz/pkg/cardutil"
+	"go-zero-ddz/pkg/types"
 )
 
 // PlayAction 出牌动作
@@ -26,7 +27,7 @@ type AIContext struct {
 	MyCards       []cardutil.Card
 	LastPlay      *LastPlayInfo
 	LastPlayerUID string
-	MyRole        PlayerRole
+	MyRole        types.PlayerRole
 	Players       map[string]*PlayerInfo
 	CardCounter   *CardCounter
 	Difficulty    string // easy | normal | hard
@@ -39,15 +40,6 @@ type LastPlayInfo struct {
 	Main    cardutil.CardValue
 	UID     string
 }
-
-// PlayerRole 玩家角色
-type PlayerRole int
-
-const (
-	RoleUnknown  PlayerRole = 0
-	RoleLandlord PlayerRole = 1
-	RolePeasant  PlayerRole = 2
-)
 
 // PlayerInfo 玩家信息
 type PlayerInfo struct {
@@ -161,7 +153,7 @@ func (ai *AIEngine) decideResponsePlay(ctx *AIContext, combos []CardCombo) *Play
 
 // shouldPassToTeammate 是否应该放过队友
 func (ai *AIEngine) shouldPassToTeammate(ctx *AIContext) bool {
-	if ctx.MyRole == RoleLandlord {
+	if ctx.MyRole == types.RoleLandlord {
 		return false // 地主没有队友
 	}
 
@@ -175,7 +167,7 @@ func (ai *AIEngine) shouldPassToTeammate(ctx *AIContext) bool {
 		return false
 	}
 
-	if !lastPlayer.IsLandlord && ctx.MyRole == RolePeasant {
+	if !lastPlayer.IsLandlord && ctx.MyRole == types.RolePeasant {
 		// 队友出牌，如果队友剩很少牌，放过
 		if lastPlayer.CardCount <= 3 {
 			return true

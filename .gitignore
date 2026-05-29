@@ -12,9 +12,12 @@ bin/
 *.exe~
 go.work
 go.work.sum
+go.sum
+*.ext
 
 # ─── IDE ──────────────────────────────────────────
 .vscode/
+.trae/
 .idea/
 *.swp
 *.swo
@@ -49,3 +52,4 @@ vendor/
 .env.local
 *.local.yaml
 !app/game/etc/game-local.yaml
+
