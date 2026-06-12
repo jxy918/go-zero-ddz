@@ -4,16 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io"
-	"log"
 	"net/http"
 	"os"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/zeromicro/go-zero/core/logx"
 
-	_ "github.com/go-sql-driver/mysql"
 	"go-zero-ddz/app/game/internal/ai"
 	"go-zero-ddz/app/game/internal/cluster"
 	"go-zero-ddz/app/game/internal/config"
@@ -21,50 +19,13 @@ import (
 	"go-zero-ddz/app/game/internal/match"
 	"go-zero-ddz/app/game/internal/room"
 	"go-zero-ddz/app/game/internal/websocket"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
-// initLogging 初始化日志系统，同时输出到控制台和文件
-func initLogging() *os.File {
-	// 创建 logs 目录
-	logDir := "logs"
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		log.Printf("Warning: failed to create log directory: %v", err)
-		return nil
-	}
-
-	// 生成日志文件名（按日期）
-	logFileName := filepath.Join(logDir, fmt.Sprintf("game-%s.log", time.Now().Format("2006-01-02")))
-	
-	// 以追加模式打开日志文件，如果不存在则创建
-	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		log.Printf("Warning: failed to open log file: %v", err)
-		return nil
-	}
-
-	// 设置日志输出同时到控制台和文件
-	log.SetOutput(os.Stdout)
-	
-	// 创建一个多写者，可以同时写入多个目的地
-	multiWriter := &multiLogger{writers: []io.Writer{os.Stdout, logFile}}
-	log.SetOutput(multiWriter)
-	
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	
-	log.Printf("Log file: %s", logFileName)
-	return logFile
-}
-
-// multiLogger 多写者日志器
-type multiLogger struct {
-	writers []io.Writer
-}
-
-func (m *multiLogger) Write(p []byte) (n int, err error) {
-	for _, w := range m.writers {
-		w.Write(p)
-	}
-	return len(p), nil
+// initLogging 初始化日志系统
+func initLogging(cfg *config.LogConfig) {
+	logx.Info("Logging initialized")
 }
 
 // ServiceContext 服务上下文
@@ -97,9 +58,6 @@ type ServiceContext struct {
 	// HTTP 服务器
 	httpServer *http.Server
 
-	// 日志文件
-	logFile *os.File
-
 	// 服务状态
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -109,8 +67,8 @@ type ServiceContext struct {
 func NewServiceContext(cfg *config.Config) (*ServiceContext, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// 初始化日志系统（同时输出到控制台和文件）
-	logFile := initLogging()
+	// 初始化日志系统
+	initLogging(&cfg.Log)
 
 	// 初始化 Redis
 	rdb, err := initRedis(cfg.Redis)
@@ -122,17 +80,16 @@ func NewServiceContext(cfg *config.Config) (*ServiceContext, error) {
 	// 初始化 MySQL
 	db, err := initMySQL(cfg.MySQL)
 	if err != nil {
-		log.Printf("MySQL init failed: %v (running without database)", err)
+		logx.Errorf("MySQL init failed: %v (running without database)", err)
 		db = nil
 	}
 
 	svcCtx := &ServiceContext{
-		Config:   cfg,
-		Redis:     rdb,
-		DB:        db,
-		logFile:   logFile,
-		ctx:       ctx,
-		cancel:    cancel,
+		Config: cfg,
+		Redis:  rdb,
+		DB:     db,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 
 	// 创建 WebSocket Hub
@@ -194,7 +151,7 @@ func (s *ServiceContext) Start() error {
 		if err := s.Registry.Register(); err != nil {
 			return fmt.Errorf("register instance: %w", err)
 		}
-		log.Printf("Instance registered: %s", s.Registry.GetInstanceID())
+		logx.Infof("Instance registered: %s", s.Registry.GetInstanceID())
 	}
 
 	// 启动消息总线（集群模式）
@@ -232,8 +189,9 @@ func (s *ServiceContext) Start() error {
 	// 指标端点
 	if s.Config.Metrics.Enabled {
 		mux.HandleFunc(s.Config.Metrics.Path, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("metrics endpoint"))
+			w.Write([]byte(s.collectMetrics()))
 		})
 	}
 
@@ -242,7 +200,7 @@ func (s *ServiceContext) Start() error {
 	if staticDir == "" {
 		staticDir = "../../client-web" // 相对于 app/game/cmd/server 的默认路径
 	}
-	log.Printf("Serving static files from: %s", staticDir)
+	logx.Infof("Serving static files from: %s", staticDir)
 	fs := http.FileServer(http.Dir(staticDir))
 	mux.Handle("/", fs)
 
@@ -251,29 +209,23 @@ func (s *ServiceContext) Start() error {
 		Handler: mux,
 	}
 
-	log.Printf("Starting WebSocket server on %s", addr)
-	log.Printf("WebSocket endpoint: ws://%s/ws", addr)
-	log.Printf("Web frontend: http://%s/", addr)
-	log.Printf("Health check: http://%s/health", addr)
+	logx.Infof("Starting WebSocket server on %s", addr)
+	logx.Infof("WebSocket endpoint: ws://%s/ws", addr)
+	logx.Infof("Web frontend: http://%s/", addr)
+	logx.Infof("Health check: http://%s/health", addr)
 
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("HTTP server error: %v", err)
+			logx.Errorf("HTTP server error: %v", err)
 		}
 	}()
 
-	log.Println("Service started successfully")
+	logx.Info("Service started successfully")
 	return nil
 }
 
 // Stop 停止服务
 func (s *ServiceContext) Stop() {
-	// 关闭日志文件
-	if s.logFile != nil {
-		s.logFile.Close()
-		s.logFile = nil
-	}
-
 	// 关闭 HTTP 服务器
 	if s.httpServer != nil {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -284,7 +236,7 @@ func (s *ServiceContext) Stop() {
 	// 注销实例（集群模式）
 	if s.Config.Cluster.Enabled && s.Registry != nil {
 		if err := s.Registry.Unregister(); err != nil {
-			log.Printf("Failed to unregister instance: %v", err)
+			logx.Errorf("Failed to unregister instance: %v", err)
 		}
 	}
 
@@ -317,6 +269,70 @@ func (s *ServiceContext) Stop() {
 	s.cancel()
 }
 
+// collectMetrics 收集监控指标
+func (s *ServiceContext) collectMetrics() string {
+	var metrics strings.Builder
+
+	// WebSocket 连接统计
+	if s.Hub != nil {
+		stats := s.Hub.GetStats()
+		metrics.WriteString(fmt.Sprintf("# HELP ddz_websocket_connections_total Total WebSocket connections\n"))
+		metrics.WriteString(fmt.Sprintf("# TYPE ddz_websocket_connections_total counter\n"))
+		metrics.WriteString(fmt.Sprintf("ddz_websocket_connections_total %d\n", stats.TotalConnections))
+
+		metrics.WriteString(fmt.Sprintf("# HELP ddz_websocket_connections_current Current WebSocket connections\n"))
+		metrics.WriteString(fmt.Sprintf("# TYPE ddz_websocket_connections_current gauge\n"))
+		metrics.WriteString(fmt.Sprintf("ddz_websocket_connections_current %d\n", stats.CurrentConnections))
+
+		metrics.WriteString(fmt.Sprintf("# HELP ddz_websocket_connections_max Max WebSocket connections\n"))
+		metrics.WriteString(fmt.Sprintf("# TYPE ddz_websocket_connections_max gauge\n"))
+		metrics.WriteString(fmt.Sprintf("ddz_websocket_connections_max %d\n", stats.MaxConnections))
+
+		metrics.WriteString(fmt.Sprintf("# HELP ddz_websocket_messages_total Total WebSocket messages\n"))
+		metrics.WriteString(fmt.Sprintf("# TYPE ddz_websocket_messages_total counter\n"))
+		metrics.WriteString(fmt.Sprintf("ddz_websocket_messages_total %d\n", stats.MessageCount))
+
+		metrics.WriteString(fmt.Sprintf("# HELP ddz_websocket_errors_total Total WebSocket errors\n"))
+		metrics.WriteString(fmt.Sprintf("# TYPE ddz_websocket_errors_total counter\n"))
+		metrics.WriteString(fmt.Sprintf("ddz_websocket_errors_total %d\n", stats.ErrorCount))
+	}
+
+	// 房间统计
+	if s.RoomManager != nil {
+		roomCount := s.RoomManager.GetRoomCount()
+		metrics.WriteString(fmt.Sprintf("# HELP ddz_rooms_total Total rooms\n"))
+		metrics.WriteString(fmt.Sprintf("# TYPE ddz_rooms_total gauge\n"))
+		metrics.WriteString(fmt.Sprintf("ddz_rooms_total %d\n", roomCount))
+	}
+
+	// 匹配队列统计（需要在 Coordinator 中添加方法）
+	if s.MatchCoordinator != nil {
+		queueStats := s.MatchCoordinator.GetQueueStats()
+		metrics.WriteString(fmt.Sprintf("# HELP ddz_match_queue_random Waiting players in random queue\n"))
+		metrics.WriteString(fmt.Sprintf("# TYPE ddz_match_queue_random gauge\n"))
+		metrics.WriteString(fmt.Sprintf("ddz_match_queue_random %d\n", queueStats.RandomCount))
+
+		metrics.WriteString(fmt.Sprintf("# HELP ddz_match_queue_ranked Waiting players in ranked queue\n"))
+		metrics.WriteString(fmt.Sprintf("# TYPE ddz_match_queue_ranked gauge\n"))
+		metrics.WriteString(fmt.Sprintf("ddz_match_queue_ranked %d\n", queueStats.RankedCount))
+
+		metrics.WriteString(fmt.Sprintf("# HELP ddz_match_matched_total Total matched players\n"))
+		metrics.WriteString(fmt.Sprintf("# TYPE ddz_match_matched_total counter\n"))
+		metrics.WriteString(fmt.Sprintf("ddz_match_matched_total %d\n", queueStats.MatchedCount))
+
+		metrics.WriteString(fmt.Sprintf("# HELP ddz_match_timeout_total Total match timeouts\n"))
+		metrics.WriteString(fmt.Sprintf("# TYPE ddz_match_timeout_total counter\n"))
+		metrics.WriteString(fmt.Sprintf("ddz_match_timeout_total %d\n", queueStats.TimeoutCount))
+	}
+
+	// 系统信息
+	metrics.WriteString(fmt.Sprintf("# HELP ddz_start_time_seconds Service start time\n"))
+	metrics.WriteString(fmt.Sprintf("# TYPE ddz_start_time_seconds gauge\n"))
+	metrics.WriteString(fmt.Sprintf("ddz_start_time_seconds %d\n", time.Now().Unix()))
+
+	return metrics.String()
+}
+
 // initRedis 初始化 Redis 客户端
 func initRedis(cfg config.RedisConfig) (redis.UniversalClient, error) {
 	var rdb redis.UniversalClient
@@ -346,7 +362,7 @@ func initRedis(cfg config.RedisConfig) (redis.UniversalClient, error) {
 		return nil, fmt.Errorf("redis ping failed: %w", err)
 	}
 
-	log.Printf("Redis connected: %s (type: %s)", cfg.Host, cfg.Type)
+	logx.Infof("Redis connected: %s (type: %s)", cfg.Host, cfg.Type)
 	return rdb, nil
 }
 
@@ -371,7 +387,7 @@ func initMySQL(cfg config.MySQLConfig) (*sql.DB, error) {
 		return nil, fmt.Errorf("mysql ping failed: %w", err)
 	}
 
-	log.Printf("MySQL connected: %s", cfg.DSN)
+	logx.Infof("MySQL connected: %s", cfg.DSN)
 	return db, nil
 }
 

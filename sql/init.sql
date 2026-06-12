@@ -1,85 +1,105 @@
--- ============================================================
--- 斗地主游戏数据库初始化脚本
--- 数据库: MySQL 8.0+
--- 字符集: utf8mb4
--- ============================================================
+/*
+SQLyog Trial v13.1.8 (64 bit)
+MySQL - 10.1.48-MariaDB-1~bionic : Database - ddz
+*********************************************************************
+*/
 
--- 创建数据库
-CREATE DATABASE IF NOT EXISTS ddz DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+/*!40101 SET NAMES utf8 */;
 
-USE ddz;
+/*!40101 SET SQL_MODE=''*/;
 
--- ============================================================
--- 用户表
--- ============================================================
-CREATE TABLE IF NOT EXISTS users (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    uid VARCHAR(64) NOT NULL UNIQUE COMMENT '用户唯一标识 (UUID)',
-    username VARCHAR(32) NOT NULL UNIQUE COMMENT '登录用户名',
-    password VARCHAR(128) NOT NULL DEFAULT '' COMMENT '密码哈希 (SHA256)',
-    nickname VARCHAR(64) NOT NULL DEFAULT '' COMMENT '显示昵称',
-    avatar_id INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '头像ID',
-    elo INT NOT NULL DEFAULT 1000 COMMENT 'ELO积分',
-    tier VARCHAR(32) NOT NULL DEFAULT 'Bronze I' COMMENT '段位',
-    gold INT NOT NULL DEFAULT 5000 COMMENT '金币',
-    wins INT NOT NULL DEFAULT 0 COMMENT '胜场',
-    losses INT NOT NULL DEFAULT 0 COMMENT '负场',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+CREATE DATABASE /*!32312 IF NOT EXISTS*/`ddz` /*!40100 DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci */;
 
-    INDEX idx_uid (uid),
-    INDEX idx_username (username),
-    INDEX idx_elo (elo),
-    INDEX idx_tier (tier)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
+USE `ddz`;
 
--- ============================================================
--- 对局记录表
--- ============================================================
-CREATE TABLE IF NOT EXISTS game_records (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    room_id VARCHAR(64) NOT NULL COMMENT '房间ID',
-    players JSON NOT NULL COMMENT '玩家列表 [{"uid":"xxx","is_landlord":true},...]',
-    winner_uid VARCHAR(64) NOT NULL COMMENT '赢家UID',
-    winner_side TINYINT NOT NULL DEFAULT 0 COMMENT '获胜方 0=地主 1=农民',
-    results JSON NOT NULL COMMENT '结算结果 [{"uid":"xxx","score_change":100,"new_elo":1100},...]',
-    base_score INT NOT NULL DEFAULT 1 COMMENT '基础分',
-    multiplier INT NOT NULL DEFAULT 1 COMMENT '倍数',
-    is_spring TINYINT NOT NULL DEFAULT 0 COMMENT '是否春天',
-    is_counter_spring TINYINT NOT NULL DEFAULT 0 COMMENT '是否反春',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+/*Table structure for table `game_records` */
 
-    INDEX idx_room_id (room_id),
-    INDEX idx_winner_uid (winner_uid),
-    INDEX idx_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='对局记录表';
+DROP TABLE IF EXISTS `game_records`;
 
--- ============================================================
--- 玩家对局结果表
--- ============================================================
-CREATE TABLE IF NOT EXISTS player_results (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    room_id VARCHAR(64) NOT NULL COMMENT '房间ID',
-    uid VARCHAR(64) NOT NULL COMMENT '玩家UID',
-    is_landlord TINYINT NOT NULL DEFAULT 0 COMMENT '是否是地主',
-    score_change INT NOT NULL DEFAULT 0 COMMENT '分数变化',
-    new_elo INT NOT NULL DEFAULT 1000 COMMENT '新的ELO积分',
-    new_tier VARCHAR(32) NOT NULL DEFAULT 'Bronze I' COMMENT '新的段位',
-    is_promoted TINYINT NOT NULL DEFAULT 0 COMMENT '是否晋级',
-    is_demoted TINYINT NOT NULL DEFAULT 0 COMMENT '是否降级',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE `game_records` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `room_id` varchar(64) NOT NULL COMMENT '房间ID',
+  `players` text NOT NULL COMMENT '玩家列表 [{"uid":"xxx","is_landlord":true},...]',
+  `winner_uid` varchar(64) NOT NULL COMMENT '赢家UID',
+  `winner_side` tinyint(4) NOT NULL DEFAULT '0' COMMENT '获胜方 0=地主 1=农民',
+  `results` text NOT NULL COMMENT '结算结果 [{"uid":"xxx","score_change":100,"new_elo":1100},...]',
+  `base_score` int(11) NOT NULL DEFAULT '1' COMMENT '基础分',
+  `multiplier` int(11) NOT NULL DEFAULT '1' COMMENT '倍数',
+  `is_spring` tinyint(4) NOT NULL DEFAULT '0' COMMENT '是否春天',
+  `is_counter_spring` tinyint(4) NOT NULL DEFAULT '0' COMMENT '是否反春',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `play_rounds` text NOT NULL COMMENT '打牌记录',
+  PRIMARY KEY (`id`),
+  KEY `idx_room_id` (`room_id`),
+  KEY `idx_winner_uid` (`winner_uid`),
+  KEY `idx_created_at` (`created_at`)
+) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COMMENT='对局记录表';
 
-    INDEX idx_room_id (room_id),
-    INDEX idx_uid (uid),
-    INDEX idx_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='玩家对局结果表';
+/*Data for the table `game_records` */
 
--- ============================================================
--- 插入测试数据
--- ============================================================
--- 密码均为 "123" 的 SHA256 哈希: a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3
-INSERT INTO users (uid, username, password, nickname, avatar_id, elo, tier, gold, wins, losses) VALUES
-('test-uid-001', 'test', 'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3', 'TestPlayer', 1, 1000, 'Bronze I', 5000, 0, 0),
-('user-002', 'zhangsan', 'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3', '张三', 2, 1200, 'Silver II', 15000, 10, 5),
-('user-003', 'lisi', 'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3', '李四', 3, 1500, 'Gold I', 20000, 20, 10),
-('user-004', 'wangwu', 'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3', '王五', 4, 1800, 'Platinum III', 30000, 35, 15);
+insert  into `game_records`(`id`,`room_id`,`players`,`winner_uid`,`winner_side`,`results`,`base_score`,`multiplier`,`is_spring`,`is_counter_spring`,`created_at`,`play_rounds`) values 
+(3,'room-1779958159850851800','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1779958159850851800-2\",\"bot-room-1779958159850851800-3\"]','411d1ab3-6a0d-4ff8-92d7-042610361cbf',1,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1779958159850851800-2\":{\"UID\":\"bot-room-1779958159850851800-2\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1779958159850851800-3\":{\"UID\":\"bot-room-1779958159850851800-3\",\"IsLandlord\":true,\"IsBot\":true,\"ScoreChange\":-2,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,1,0,0,'2026-05-28 16:53:04',''),
+(4,'room-1779965811443961300','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1779965811443961300-2\",\"bot-room-1779965811443961300-3\"]','411d1ab3-6a0d-4ff8-92d7-042610361cbf',0,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":true,\"IsBot\":false,\"ScoreChange\":4,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1779965811443961300-2\":{\"UID\":\"bot-room-1779965811443961300-2\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":-2,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1779965811443961300-3\":{\"UID\":\"bot-room-1779965811443961300-3\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":-2,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,2,1,0,'2026-05-28 19:00:19',''),
+(5,'room-1780044198350086800','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1780044198350086800-2\",\"bot-room-1780044198350086800-3\"]','411d1ab3-6a0d-4ff8-92d7-042610361cbf',1,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780044198350086800-2\":{\"UID\":\"bot-room-1780044198350086800-2\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780044198350086800-3\":{\"UID\":\"bot-room-1780044198350086800-3\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,1,0,0,'2026-05-29 16:46:17',''),
+(6,'room-1780044419808992400','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1780044419808992400-2\",\"bot-room-1780044419808992400-3\"]','bot-room-1780044419808992400-3',1,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780044419808992400-2\":{\"UID\":\"bot-room-1780044419808992400-2\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780044419808992400-3\":{\"UID\":\"bot-room-1780044419808992400-3\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,1,0,0,'2026-05-29 16:49:48',''),
+(7,'room-1780048956439425000','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1780048956439425000-2\",\"bot-room-1780048956439425000-3\"]','411d1ab3-6a0d-4ff8-92d7-042610361cbf',1,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780048956439425000-2\":{\"UID\":\"bot-room-1780048956439425000-2\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780048956439425000-3\":{\"UID\":\"bot-room-1780048956439425000-3\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,1,0,0,'2026-05-29 18:06:44',''),
+(8,'room-1780399681370798000','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1780399681370798000-2\",\"bot-room-1780399681370798000-4\"]','411d1ab3-6a0d-4ff8-92d7-042610361cbf',1,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":2,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780399681370798000-2\":{\"UID\":\"bot-room-1780399681370798000-2\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":2,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780399681370798000-4\":{\"UID\":\"bot-room-1780399681370798000-4\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":2,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,2,0,0,'2026-06-02 19:33:09',''),
+(9,'room-1780473615199335100','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1780473615199335100-2\",\"bot-room-1780473615199335100-4\"]','411d1ab3-6a0d-4ff8-92d7-042610361cbf',1,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":1,\"NewELO\":1,\"NewTier\":\"青铜I\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780473615199335100-2\":{\"UID\":\"bot-room-1780473615199335100-2\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780473615199335100-4\":{\"UID\":\"bot-room-1780473615199335100-4\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,1,0,0,'2026-06-03 16:05:39',''),
+(10,'room-1780479009951372800','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1780479009951372800-2\",\"bot-room-1780479009951372800-4\"]','bot-room-1780479009951372800-4',1,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":1,\"NewELO\":1,\"NewTier\":\"青铜I\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780479009951372800-2\":{\"UID\":\"bot-room-1780479009951372800-2\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780479009951372800-4\":{\"UID\":\"bot-room-1780479009951372800-4\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,1,0,0,'2026-06-03 17:33:23',''),
+(11,'room-1780480621667209800','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1780480621667209800-2\",\"bot-room-1780480621667209800-4\"]','bot-room-1780480621667209800-2',0,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":-4,\"NewELO\":-4,\"NewTier\":\"青铜I\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780480621667209800-2\":{\"UID\":\"bot-room-1780480621667209800-2\",\"IsLandlord\":true,\"IsBot\":true,\"ScoreChange\":8,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780480621667209800-4\":{\"UID\":\"bot-room-1780480621667209800-4\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":-4,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,4,1,0,'2026-06-03 18:05:37',''),
+(12,'room-1780559407227733100','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1780559407227733100-2\",\"bot-room-1780559407227733100-4\"]','bot-room-1780559407227733100-4',0,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":-4,\"NewELO\":-4,\"NewTier\":\"青铜I\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780559407227733100-2\":{\"UID\":\"bot-room-1780559407227733100-2\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":-4,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780559407227733100-4\":{\"UID\":\"bot-room-1780559407227733100-4\",\"IsLandlord\":true,\"IsBot\":true,\"ScoreChange\":8,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,4,1,0,'2026-06-04 15:58:59',''),
+(13,'room-1780562376275224100','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1780562376275224100-2\",\"bot-room-1780562376275224100-4\"]','bot-room-1780562376275224100-2',0,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":-8,\"NewELO\":-8,\"NewTier\":\"青铜I\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780562376275224100-2\":{\"UID\":\"bot-room-1780562376275224100-2\",\"IsLandlord\":true,\"IsBot\":true,\"ScoreChange\":16,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780562376275224100-4\":{\"UID\":\"bot-room-1780562376275224100-4\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":-8,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,8,1,0,'2026-06-04 16:47:29',''),
+(14,'room-1780642272628722000','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1780642272628722000-2\",\"bot-room-1780642272628722000-3\"]','411d1ab3-6a0d-4ff8-92d7-042610361cbf',1,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780642272628722000-2\":{\"UID\":\"bot-room-1780642272628722000-2\",\"IsLandlord\":true,\"IsBot\":true,\"ScoreChange\":-2,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780642272628722000-3\":{\"UID\":\"bot-room-1780642272628722000-3\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,1,0,0,'2026-06-05 14:56:21','null'),
+(15,'room-1780656263298259000','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1780656263298259000-2\",\"bot-room-1780656263298259000-3\"]','411d1ab3-6a0d-4ff8-92d7-042610361cbf',1,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":2,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780656263298259000-2\":{\"UID\":\"bot-room-1780656263298259000-2\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":2,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780656263298259000-3\":{\"UID\":\"bot-room-1780656263298259000-3\",\"IsLandlord\":true,\"IsBot\":true,\"ScoreChange\":-4,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,2,0,0,'2026-06-05 18:46:53','null'),
+(16,'room-1780992471938286700','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1780992471938286700-2\",\"bot-room-1780992471938286700-3\"]','411d1ab3-6a0d-4ff8-92d7-042610361cbf',1,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780992471938286700-2\":{\"UID\":\"bot-room-1780992471938286700-2\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":1,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1780992471938286700-3\":{\"UID\":\"bot-room-1780992471938286700-3\",\"IsLandlord\":true,\"IsBot\":true,\"ScoreChange\":-2,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,1,0,0,'2026-06-09 16:11:06','[{\"round_index\":0,\"player_uid\":\"bot-room-1780992471938286700-3\",\"action\":\"play\",\"cards\":[3,4,5,6,7,8],\"pattern\":\"顺子\",\"timestamp\":1780992506},{\"round_index\":1,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[9,10,11,12,13],\"pattern\":\"顺子\",\"timestamp\":1780992515},{\"round_index\":2,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[3,4,5,6,7],\"pattern\":\"顺子\",\"timestamp\":1780992540},{\"round_index\":3,\"player_uid\":\"bot-room-1780992471938286700-3\",\"action\":\"play\",\"cards\":[8,9,10,11,12],\"pattern\":\"顺子\",\"timestamp\":1780992555},{\"round_index\":4,\"player_uid\":\"bot-room-1780992471938286700-3\",\"action\":\"play\",\"cards\":[6],\"pattern\":\"单张\",\"timestamp\":1780992575},{\"round_index\":5,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[11],\"pattern\":\"单张\",\"timestamp\":1780992582},{\"round_index\":6,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[3,3],\"pattern\":\"对子\",\"timestamp\":1780992603},{\"round_index\":7,\"player_uid\":\"bot-room-1780992471938286700-3\",\"action\":\"play\",\"cards\":[13,13],\"pattern\":\"对子\",\"timestamp\":1780992618},{\"round_index\":8,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[15,15],\"pattern\":\"对子\",\"timestamp\":1780992624},{\"round_index\":9,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[12],\"pattern\":\"单张\",\"timestamp\":1780992644},{\"round_index\":10,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[16],\"pattern\":\"单张\",\"timestamp\":1780992666}]'),
+(17,'room-1781248826725697800','[\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"bot-room-1781248826725697800-2\",\"bot-room-1781248826725697800-3\"]','bot-room-1781248826725697800-2',0,'{\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\":{\"UID\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"IsLandlord\":false,\"IsBot\":false,\"ScoreChange\":-2,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1781248826725697800-2\":{\"UID\":\"bot-room-1781248826725697800-2\",\"IsLandlord\":true,\"IsBot\":true,\"ScoreChange\":4,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false},\"bot-room-1781248826725697800-3\":{\"UID\":\"bot-room-1781248826725697800-3\",\"IsLandlord\":false,\"IsBot\":true,\"ScoreChange\":-2,\"NewELO\":0,\"NewTier\":\"\",\"IsPromoted\":false,\"IsDemoted\":false}}',1,2,0,0,'2026-06-12 15:25:22','[{\"round_index\":0,\"player_uid\":\"bot-room-1781248826725697800-2\",\"action\":\"play\",\"cards\":[3,3,3,3,9,4],\"pattern\":\"四带二\",\"timestamp\":1781248877},{\"round_index\":1,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[4,4,4,4,5,5],\"pattern\":\"四带二\",\"timestamp\":1781248893},{\"round_index\":2,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[7,7,7,10,10],\"pattern\":\"三带二\",\"timestamp\":1781248919},{\"round_index\":3,\"player_uid\":\"bot-room-1781248826725697800-3\",\"action\":\"play\",\"cards\":[8,8,8,15,15],\"pattern\":\"三带二\",\"timestamp\":1781248934},{\"round_index\":4,\"player_uid\":\"bot-room-1781248826725697800-2\",\"action\":\"play\",\"cards\":[12,12,12,15,15],\"pattern\":\"三带二\",\"timestamp\":1781248938},{\"round_index\":5,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[11,11,13,13,13],\"pattern\":\"三带二\",\"timestamp\":1781248943},{\"round_index\":6,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[16,17],\"pattern\":\"王炸\",\"timestamp\":1781248964},{\"round_index\":7,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[14,14],\"pattern\":\"对子\",\"timestamp\":1781248984},{\"round_index\":8,\"player_uid\":\"411d1ab3-6a0d-4ff8-92d7-042610361cbf\",\"action\":\"play\",\"cards\":[6],\"pattern\":\"单张\",\"timestamp\":1781249022},{\"round_index\":9,\"player_uid\":\"bot-room-1781248826725697800-3\",\"action\":\"play\",\"cards\":[9],\"pattern\":\"单张\",\"timestamp\":1781249027},{\"round_index\":10,\"player_uid\":\"bot-room-1781248826725697800-2\",\"action\":\"play\",\"cards\":[11],\"pattern\":\"单张\",\"timestamp\":1781249031},{\"round_index\":11,\"player_uid\":\"bot-room-1781248826725697800-3\",\"action\":\"play\",\"cards\":[13],\"pattern\":\"单张\",\"timestamp\":1781249062},{\"round_index\":12,\"player_uid\":\"bot-room-1781248826725697800-2\",\"action\":\"play\",\"cards\":[16],\"pattern\":\"单张\",\"timestamp\":1781249065},{\"round_index\":13,\"player_uid\":\"bot-room-1781248826725697800-2\",\"action\":\"play\",\"cards\":[5,5,6,6,7,7],\"pattern\":\"连对\",\"timestamp\":1781249094},{\"round_index\":14,\"player_uid\":\"bot-room-1781248826725697800-2\",\"action\":\"play\",\"cards\":[13],\"pattern\":\"单张\",\"timestamp\":1781249122}]');
+
+/*Table structure for table `users` */
+
+DROP TABLE IF EXISTS `users`;
+
+CREATE TABLE `users` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `uid` varchar(64) NOT NULL COMMENT '用户唯一标识',
+  `username` varchar(32) NOT NULL DEFAULT '',
+  `nickname` varchar(64) NOT NULL DEFAULT '' COMMENT '昵称',
+  `password` varchar(128) NOT NULL DEFAULT '',
+  `avatar_id` int(10) unsigned NOT NULL DEFAULT '0' COMMENT '头像ID',
+  `elo` int(11) NOT NULL DEFAULT '1000' COMMENT 'ELO积分',
+  `tier` varchar(32) NOT NULL DEFAULT '青铜I' COMMENT '段位',
+  `gold` int(11) NOT NULL DEFAULT '10000' COMMENT '金币',
+  `wins` int(11) NOT NULL DEFAULT '0' COMMENT '胜场',
+  `losses` int(11) NOT NULL DEFAULT '0' COMMENT '负场',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uid` (`uid`),
+  KEY `idx_uid` (`uid`),
+  KEY `idx_elo` (`elo`),
+  KEY `idx_tier` (`tier`)
+) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
+
+/*Data for the table `users` */
+
+insert  into `users`(`id`,`uid`,`username`,`nickname`,`password`,`avatar_id`,`elo`,`tier`,`gold`,`wins`,`losses`,`created_at`,`updated_at`) values 
+(1,'user001','user_1','张三','',0,1200,'白银II',15000,0,0,'2026-05-21 16:35:22','2026-05-21 20:36:43'),
+(2,'user002','user_2','李四','',0,1500,'白银III',12000,0,0,'2026-05-21 16:35:22','2026-05-21 20:36:43'),
+(3,'user003','user_3','王五','',0,2000,'黄金I',20000,0,0,'2026-05-21 16:35:22','2026-05-21 20:36:43'),
+(4,'user004','user_4','赵六','',0,800,'青铜III',8000,0,0,'2026-05-21 16:35:22','2026-05-21 20:36:43'),
+(5,'user005','user_5','孙七','',0,3000,'铂金II',50000,0,0,'2026-05-21 16:35:22','2026-05-21 20:36:43'),
+(6,'62ef9208-3088-4e66-820b-22d9871c46cc','newuser1','NewUser1','8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92',1,1000,'Bronze I',5000,0,0,'2026-05-21 20:37:22','2026-05-21 20:37:22'),
+(7,'411d1ab3-6a0d-4ff8-92d7-042610361cbf','test123','test123','ecd71870d1963316a97e3ac3408c9835ad8cf0f3c1bc703527c30265534f75ae',1,1000,'Bronze I',5000,0,0,'2026-05-21 20:38:05','2026-05-21 20:38:05'),
+(8,'5567060c-d01a-4b8d-a278-380ed0e15675','test124','test124','a248d958573f5b710bfa762512f6bfb7f6e8aa7c42e69296f7e5843ef6ce197e',1,1000,'Bronze I',5000,0,0,'2026-05-21 20:42:07','2026-05-21 20:42:07'),
+(9,'db1ddfdb-9267-412f-8745-1930460a10c0','test125','test125','0880de822d15f4cfecb4adaa4633092d7d2f7d33659969e9a8982a19623b3872',1,1000,'Bronze I',5000,0,0,'2026-05-21 20:57:16','2026-05-21 20:57:16'),
+(10,'c4e02ac7-4c3f-4d91-bbf8-6517caf71ccb','wstest','WSTest','ecd71870d1963316a97e3ac3408c9835ad8cf0f3c1bc703527c30265534f75ae',1,1000,'Bronze I',5000,0,0,'2026-05-21 20:59:59','2026-05-21 20:59:59'),
+(11,'f1e1529d-d9fb-45e7-a917-9425084ac8a5','fulltest','FullTest','ecd71870d1963316a97e3ac3408c9835ad8cf0f3c1bc703527c30265534f75ae',1,1000,'Bronze I',5000,0,0,'2026-05-21 21:02:44','2026-05-21 21:02:44'),
+(12,'b29d344a-a567-4d66-8f26-25ac7a5999da','test','TestPlayer','a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3',1,1000,'Bronze I',5000,0,0,'2026-05-25 16:33:54','2026-05-25 16:33:54');
+
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;

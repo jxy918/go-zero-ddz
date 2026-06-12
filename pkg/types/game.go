@@ -39,13 +39,31 @@ const (
 
 // 游戏常量
 const (
-	MaxRoomSize       = 3      // 房间最大人数
-	MinRoomSize       = 2      // 房间最小人数（可以开始游戏）
-	TotalCards        = 54     // 总牌数
-	LandlordCards     = 20     // 地主牌数
-	PeasantCards      = 17     // 农民牌数
-	BottomCards       = 3      // 底牌数
-	CallLandlordTimer = 15     // 叫地主超时时间（秒）
-	PlayCardsTimer    = 15     // 出牌超时时间（秒）
-	MatchTimeout      = 30     // 匹配超时时间（秒）
+	MaxRoomSize       = 3  // 房间最大人数
+	MinRoomSize       = 2  // 房间最小人数（可以开始游戏）
+	TotalCards        = 54 // 总牌数
+	LandlordCards     = 20 // 地主牌数
+	PeasantCards      = 17 // 农民牌数
+	BottomCards       = 3  // 底牌数
+	CallLandlordTimer = 15 // 叫地主超时时间（秒）
+	PlayCardsTimer    = 15 // 出牌超时时间（秒）
+	MatchTimeout      = 30 // 匹配超时时间（秒）
 )
+
+// PlayAction 出牌动作类型
+type PlayAction string
+
+const (
+	PlayActionPlay  PlayAction = "play"  // 出牌
+	PlayActionPass  PlayAction = "pass"  // 跳过（Pass）
+)
+
+// PlayRoundRecord 打牌轮次记录
+type PlayRoundRecord struct {
+	RoundIndex int          `json:"round_index"` // 轮次索引
+	PlayerUID  string       `json:"player_uid"`  // 出牌玩家UID
+	Action     PlayAction   `json:"action"`      // 动作类型
+	Cards      []int        `json:"cards"`       // 牌面（牌值数组）
+	Pattern    string       `json:"pattern"`     // 牌型
+	Timestamp  int64        `json:"timestamp"`   // 时间戳
+}

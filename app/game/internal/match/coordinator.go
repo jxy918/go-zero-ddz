@@ -2,10 +2,10 @@ package match
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/zeromicro/go-zero/core/logx"
 
 	"go-zero-ddz/app/game/internal/room"
 	"go-zero-ddz/app/game/internal/websocket"
@@ -21,15 +21,25 @@ type Config struct {
 	BotFillTimeout int // Bot 填充超时
 }
 
+// QueueStats 队列统计
+type QueueStats struct {
+	RandomCount  int64
+	RankedCount  int64
+	MatchedCount int64
+	TimeoutCount int64
+}
+
 // Coordinator 匹配协调器
 type Coordinator struct {
-	cfg       Config
-	queue     *Queue
-	roomMgr   *room.Manager
-	hub       *websocket.Hub
-	rdb       redis.UniversalClient
-	ctx       context.Context
-	cancel    context.CancelFunc
+	cfg          Config
+	queue        *Queue
+	roomMgr      *room.Manager
+	hub          *websocket.Hub
+	rdb          redis.UniversalClient
+	ctx          context.Context
+	cancel       context.CancelFunc
+	matchedCount int64
+	timeoutCount int64
 }
 
 // NewCoordinator 创建匹配协调器
@@ -50,18 +60,18 @@ func NewCoordinator(cfg Config, rdb redis.UniversalClient, roomMgr *room.Manager
 // Start 启动匹配系统
 func (c *Coordinator) Start() {
 	if !c.cfg.Enabled {
-		log.Println("Matchmaking disabled")
+		logx.Info("Matchmaking disabled")
 		return
 	}
 
-	log.Println("Matchmaking started")
+	logx.Info("Matchmaking started")
 	go c.scanLoop()
 }
 
 // Stop 停止匹配系统
 func (c *Coordinator) Stop() {
 	c.cancel()
-	log.Println("Matchmaking stopped")
+	logx.Info("Matchmaking stopped")
 }
 
 // Enqueue 玩家入队
@@ -98,7 +108,7 @@ func (c *Coordinator) scanRandomQueue() {
 
 	players, err := c.queue.GetRandomQueue(ctx, 100)
 	if err != nil {
-		log.Printf("Failed to get random queue: %v", err)
+		logx.Errorf("Failed to get random queue: %v", err)
 		return
 	}
 
@@ -172,7 +182,7 @@ func (c *Coordinator) createMatchRoom(ctx context.Context, players []*WaitingPla
 	roomID := room.GenerateID()
 	r, err := c.roomMgr.CreateRoom(roomID)
 	if err != nil {
-		log.Printf("Failed to create match room: %v", err)
+		logx.Errorf("Failed to create match room: %v", err)
 		return
 	}
 
@@ -188,7 +198,7 @@ func (c *Coordinator) createMatchRoom(ctx context.Context, players []*WaitingPla
 			IsReady:  true, // 匹配玩家自动准备
 		}
 		if err := r.AddPlayer(player); err != nil {
-			log.Printf("Failed to add player %s to room: %v", p.UID, err)
+			logx.Errorf("Failed to add player %s to room: %v", p.UID, err)
 			return
 		}
 	}
@@ -201,17 +211,38 @@ func (c *Coordinator) createMatchRoom(ctx context.Context, players []*WaitingPla
 
 		// 查找玩家连接并发送通知
 		// 实际应该通过 Hub 发送
-		log.Printf("Match success: player %s -> room %s", p.UID, roomID)
+		logx.Infof("Match success: player %s -> room %s", p.UID, roomID)
 	}
 
 	// 从队列中移除
 	c.queue.RemovePlayers(ctx, players)
 
 	// 自动开始游戏（所有玩家已准备）
-	log.Printf("Match room %s created with %d players (ranked: %v)", roomID, len(players), isRanked)
+	logx.Infof("Match room %s created with %d players (ranked: %v)", roomID, len(players), isRanked)
 }
 
 func generateBotUID() string {
 	return "bot_" + time.Now().Format("20060102150405")
 }
 
+// GetQueueStats 获取队列统计信息
+func (c *Coordinator) GetQueueStats() QueueStats {
+	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+	defer cancel()
+
+	randomPlayers, _ := c.queue.GetRandomQueue(ctx, 1000)
+	randomCount := int64(len(randomPlayers))
+
+	rankedCount := int64(0)
+	for _, tier := range Tiers {
+		players, _ := c.queue.GetRankedQueue(ctx, tier.Name, tier.Min, tier.Max, 1000)
+		rankedCount += int64(len(players))
+	}
+
+	return QueueStats{
+		RandomCount:  randomCount,
+		RankedCount:  rankedCount,
+		MatchedCount: c.matchedCount,
+		TimeoutCount: c.timeoutCount,
+	}
+}

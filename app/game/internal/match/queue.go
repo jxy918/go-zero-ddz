@@ -135,8 +135,8 @@ func (q *Queue) GetRandomQueue(ctx context.Context, limit int64) ([]*WaitingPlay
 func (q *Queue) GetRankedQueue(ctx context.Context, tier string, eloMin, eloMax int32, limit int64) ([]*WaitingPlayer, error) {
 	key := fmt.Sprintf("%s:ranked:%s", q.prefix, tier)
 	members, err := q.rdb.ZRangeByScore(ctx, key, &redis.ZRangeBy{
-		Min: fmt.Sprintf("%d", eloMin),
-		Max: fmt.Sprintf("%d", eloMax),
+		Min:   fmt.Sprintf("%d", eloMin),
+		Max:   fmt.Sprintf("%d", eloMax),
 		Count: limit,
 	}).Result()
 	if err != nil {

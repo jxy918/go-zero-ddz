@@ -38,7 +38,7 @@ Room:
   PlayTimeout: 15
   ReconnectTimeout: 300
   SnapshotInterval: 30
-  BotJoinTimeout: 15
+  BotJoinTimeout: 5
 
 Match:
   Enabled: true

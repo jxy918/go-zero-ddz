@@ -37,6 +37,7 @@ type Manager struct {
 	onStartGame            func(room *Room)
 	onBotPlayerJoined      func(roomID, uid, nickname string, isBot, isReady bool)
 	onRoomBotJoinCountdown func(room *Room, seconds int)
+	onGameEnd              func(room *Room, gsm *GameStateMachine) // 游戏结束回调（保存数据库）
 }
 
 // RoomConfig 房间配置
@@ -93,10 +94,23 @@ func (m *Manager) SetOnRoomBotJoinCountdown(callback func(room *Room, seconds in
 	}
 }
 
+// SetOnGameEnd 设置游戏结束回调
+func (m *Manager) SetOnGameEnd(callback func(room *Room, gsm *GameStateMachine)) {
+	m.onGameEnd = callback
+}
+
 // CreateRoom 创建房间
 func (m *Manager) CreateRoom(id string) (*Room, error) {
+	log.Printf("[DEBUG] CreateRoom called for id=%s", id)
+
+	log.Printf("[DEBUG] CreateRoom: acquiring roomsMu.Lock()")
 	m.roomsMu.Lock()
-	defer m.roomsMu.Unlock()
+	log.Printf("[DEBUG] CreateRoom: acquired roomsMu.Lock()")
+
+	defer func() {
+		log.Printf("[DEBUG] CreateRoom: releasing roomsMu.Lock()")
+		m.roomsMu.Unlock()
+	}()
 
 	if len(m.rooms) >= m.config.MaxRooms {
 		return nil, fmt.Errorf("max rooms reached")
@@ -106,18 +120,25 @@ func (m *Manager) CreateRoom(id string) (*Room, error) {
 		return nil, fmt.Errorf("room already exists")
 	}
 
+	log.Printf("[DEBUG] CreateRoom: calling NewRoom(%s)", id)
 	room := NewRoom(id)
+	log.Printf("[DEBUG] CreateRoom: NewRoom returned")
+
 	m.rooms[id] = room
+	log.Printf("[DEBUG] CreateRoom: room added to map")
 
 	// 设置回调
+	log.Printf("[DEBUG] CreateRoom: setting callbacks")
 	room.OnStateChange = m.onStateChange
+	log.Printf("[DEBUG] CreateRoom: OnStateChange set")
 	room.OnTimeout = m.onTimeout
+	log.Printf("[DEBUG] CreateRoom: OnTimeout set")
 	room.OnBotJoinTimeout = m.onBotJoinTimeout
+	log.Printf("[DEBUG] CreateRoom: OnBotJoinTimeout set")
 	room.OnBotJoinCountdown = m.onRoomBotJoinCountdown
+	log.Printf("[DEBUG] CreateRoom: OnBotJoinCountdown set")
 
 	log.Printf("Room %s created (total: %d)", id, len(m.rooms))
-
-	// 不立即启动机器人加入计时器，等待玩家准备后再启动
 
 	return room, nil
 }
@@ -171,21 +192,45 @@ func (m *Manager) onStateChange(room *Room, oldState, newState types.RoomState) 
 		// 开始叫地主，启动倒计时
 		m.startCallTimer(room)
 	case types.StatePlaying:
-		// 开始出牌，启动倒计时
-		m.startPlayTimer(room)
+		// 开始出牌阶段，根据当前玩家类型处理
+		room.mu.RLock()
+		currentUID := room.CurrentTurnUID
+		currentPlayer, exists := room.Players[currentUID]
+		isBot := exists && currentPlayer.IsBot
+		isAIControlled := exists && currentPlayer.IsAIControlled
+		room.mu.RUnlock()
+
+		if exists {
+			if isBot || isAIControlled {
+				// 如果是机器人或AI控制的玩家，延迟触发AI操作，不启动计时器
+				log.Printf("onStateChange: triggering bot for player %s", currentUID)
+				m.triggerBotIfNeeded(room)
+			} else {
+				// 如果是真人玩家，延迟启动计时器（给玩家足够时间看底牌）
+				// Bug 1 修复：确认地主后延迟5秒再启动出牌计时器
+				const landlordShowDelay = 5 // 秒
+				log.Printf("onStateChange: delaying timer start for human player %s by %d seconds (to show bottom cards)", currentUID, landlordShowDelay)
+				time.AfterFunc(time.Duration(landlordShowDelay)*time.Second, func() {
+					// 再次检查状态，确保仍在出牌阶段
+					room.mu.RLock()
+					currentState := room.State
+					room.mu.RUnlock()
+					if currentState == types.StatePlaying {
+						room.StartTimer(m.config.PlayTimeout, currentUID)
+						log.Printf("onStateChange: started timer for human player %s after delay", currentUID)
+						// 广播定时器消息
+						if m.hub != nil {
+							payload := []byte(fmt.Sprintf(`{"remaining_seconds":%d,"current_turn_uid":"%s"}`,
+								m.config.PlayTimeout, currentUID))
+							m.hub.BroadcastToRoom(room.ID, 0x0408, payload)
+						}
+					}
+				})
+			}
+		}
 	case types.StateSettlement:
 		// 结算
 		room.StopTimer()
-	}
-
-	// 如果当前轮到 Bot，立即触发 AI 操作（已持有锁）
-	m.triggerBotIfNeededLocked(room)
-
-	// 如果当前轮到真人玩家，启动计时器
-	currentPlayer, exists := room.Players[room.CurrentTurnUID]
-	if exists && !currentPlayer.IsBot && !currentPlayer.IsAIControlled {
-		room.StartTimer(15, room.CurrentTurnUID)
-		log.Printf("onStateChange: started timer for human player %s", room.CurrentTurnUID)
 	}
 }
 
@@ -385,17 +430,60 @@ func (m *Manager) TriggerBotIfNeeded(room *Room) {
 
 		if actualState == types.StateCalling {
 			log.Printf("TriggerBotIfNeeded: calling botCallLandlord")
-			m.botCallLandlord(room, currentUID)
+			room.mu.RLock()
+			player, exists := room.Players[actualUID]
+			isBot := exists && player.IsBot
+			room.mu.RUnlock()
+			m.botCallLandlord(room, actualUID, isBot)
 		} else if actualState == types.StatePlaying {
 			log.Printf("TriggerBotIfNeeded: calling onTimeout")
-			m.onTimeout(room, currentUID)
+			m.onTimeout(room, actualUID)
 		} else {
 			log.Printf("TriggerBotIfNeeded: state is not calling or playing, doing nothing")
 		}
 	})
 }
 
+// triggerBotIfNeeded 检查并触发机器人操作（线程安全版本）
+func (m *Manager) triggerBotIfNeeded(room *Room) {
+	room.mu.RLock()
+	currentUID := room.CurrentTurnUID
+	player, exists := room.Players[currentUID]
+	isBot := exists && player.IsBot
+	isAIControlled := exists && player.IsAIControlled
+	room.mu.RUnlock()
+
+	if !exists || (!isBot && !isAIControlled) {
+		return
+	}
+
+	// 机器人出牌延迟（给玩家足够看牌和反应时间）
+	// Bug 7 修复：叫地主阶段 1500-2500ms，出牌阶段 3000-5000ms（让玩家看到底牌）
+	room.mu.RLock()
+	currentState := room.State
+	room.mu.RUnlock()
+
+	var delay time.Duration
+	if currentState == types.StatePlaying {
+		delay = time.Duration(3000+m.rng.Intn(2000)) * time.Millisecond
+	} else {
+		delay = time.Duration(1500+m.rng.Intn(1000)) * time.Millisecond
+	}
+	time.AfterFunc(delay, func() {
+		room.mu.RLock()
+		currentState := room.State
+		room.mu.RUnlock()
+
+		if currentState == types.StateCalling {
+			m.botCallLandlord(room, currentUID, isBot)
+		} else if currentState == types.StatePlaying {
+			m.onTimeout(room, currentUID)
+		}
+	})
+}
+
 // triggerBotIfNeededLocked 内部调用，假设调用方已持有 room.mu 锁
+// 注意：此函数假设调用方已持有 room.mu 锁，所以直接读取状态而不再获取锁
 func (m *Manager) triggerBotIfNeededLocked(room *Room) {
 	currentUID := room.CurrentTurnUID
 	player, exists := room.Players[currentUID]
@@ -403,28 +491,45 @@ func (m *Manager) triggerBotIfNeededLocked(room *Room) {
 		return
 	}
 
+	isBot := player.IsBot
+
 	// 机器人出牌延迟（给玩家足够看牌和反应时间）
-	delay := time.Duration(1500+m.rng.Intn(1000)) * time.Millisecond
+	// Bug 7 修复：叫地主阶段 1500-2500ms，出牌阶段 3000-5000ms（让玩家看到底牌）
+	// 注意：调用方已持有锁，直接读取状态
+	currentState := room.State
+
+	var delay time.Duration
+	if currentState == types.StatePlaying {
+		delay = time.Duration(3000+m.rng.Intn(2000)) * time.Millisecond
+	} else {
+		delay = time.Duration(1500+m.rng.Intn(1000)) * time.Millisecond
+	}
+
+	// 将需要的值拷贝到闭包中，避免在goroutine中访问已释放的锁
+	uid := currentUID
+	isBotCopy := isBot
+
 	time.AfterFunc(delay, func() {
 		room.mu.RLock()
 		currentState := room.State
 		room.mu.RUnlock()
 
 		if currentState == types.StateCalling {
-			m.botCallLandlord(room, currentUID)
+			m.botCallLandlord(room, uid, isBotCopy)
 		} else if currentState == types.StatePlaying {
-			m.onTimeout(room, currentUID)
+			m.onTimeout(room, uid)
 		}
 	})
 }
 
-// botCallLandlord Bot 叫地主
-func (m *Manager) botCallLandlord(room *Room, uid string) {
+// botCallLandlord 处理叫地主（支持机器人和真人超时后的AI替叫）
+// isBot 参数用于区分是真正的机器人还是真人玩家超时后的AI替叫
+func (m *Manager) botCallLandlord(room *Room, uid string, isBot bool) {
 	room.mu.Lock()
 	player, exists := room.Players[uid]
 	callScore := int32(0)
 	action := 0
-	if exists && !player.IsLandlord && m.rng.Float64() < 0.3 {
+	if exists && !player.IsLandlord && m.rng.Float64() < 0.7 {
 		callScore = int32(m.rng.Intn(3) + 1)
 		action = 1
 	}
@@ -441,24 +546,35 @@ func (m *Manager) botCallLandlord(room *Room, uid string) {
 	}
 
 	gsm.CallLandlord(uid, action, callScore)
-	log.Printf("Bot %s called: action=%d score=%d", uid, action, callScore)
+	if isBot {
+		log.Printf("Bot %s called: action=%d score=%d", uid, action, callScore)
+	} else {
+		log.Printf("Player %s timeout, AI called landlord: action=%d score=%d", uid, action, callScore)
+	}
 
-	// 通过 Hub 广播机器人叫地主结果
+	// 通过 Hub 广播叫地主结果
 	if m.hub != nil {
-		log.Printf("Room %s: broadcasting bot call result: uid=%s, action=%d, score=%d", room.ID, uid, action, callScore)
-		payload := []byte(fmt.Sprintf(`{"uid":"%s","action":%d,"score":%d,"round":%d}`,
-			uid, action, callScore, gsm.CurrentCallRound()))
+		if isBot {
+			log.Printf("Room %s: broadcasting bot call result: uid=%s, action=%d, score=%d", room.ID, uid, action, callScore)
+		} else {
+			log.Printf("Room %s: broadcasting AI call result for timeout player: uid=%s, action=%d, score=%d", room.ID, uid, action, callScore)
+		}
+		payload := []byte(fmt.Sprintf(`{"uid":"%s","action":%d,"score":%d,"round":%d,"is_bot":%t}`,
+			uid, action, callScore, gsm.CurrentCallRound(), isBot))
 		m.hub.BroadcastToRoom(room.ID, 0x0403, payload)
 	}
 
 	// 检查是否所有玩家都叫完了
 	if !gsm.AllCalled() {
 		// 还没叫完，继续下一个玩家
+		// 注意：需要获取锁来安全地读取 room.PlayerIDs
+		room.mu.RLock()
 		nextIdx := gsm.currentCallIdx
 		if nextIdx < 0 || nextIdx >= len(room.PlayerIDs) {
 			nextIdx = 0
 		}
 		nextUID := room.PlayerIDs[nextIdx]
+		room.mu.RUnlock()
 
 		roomID := room.ID
 		hub := m.hub
@@ -469,7 +585,21 @@ func (m *Manager) botCallLandlord(room *Room, uid string) {
 				return
 			}
 
+			// 关键检查：只有在叫地主阶段才发送"轮到叫地主"消息
+			// 如果叫地主阶段已经结束，不发送消息
+			room.mu.RLock()
+			currentState := room.State
+			room.mu.RUnlock()
+
+			if currentState != types.StateCalling {
+				log.Printf("Room %s: skipping 'next to call' notification, state=%d (not calling phase)", roomID, currentState)
+				return
+			}
+
+			// 安全地更新当前回合玩家并启动计时器
+			room.mu.Lock()
 			room.CurrentTurnUID = nextUID
+			room.mu.Unlock()
 			room.StartTimer(15, nextUID)
 
 			// 通知轮到下一个玩家叫地主（不包含 action 和 score，避免被误解为叫地主结果）
@@ -480,10 +610,16 @@ func (m *Manager) botCallLandlord(room *Room, uid string) {
 				hub.BroadcastToRoom(roomID, 0x0408, payload)
 			}
 
-			// 如果下一个是机器人，延迟触发
-			if nextPlayer, exists := room.Players[nextUID]; exists && (nextPlayer.IsBot || nextPlayer.IsAIControlled) {
-				time.AfterFunc(1500*time.Millisecond, func() {
-					m.botCallLandlord(room, nextUID)
+			// 如果下一个是机器人或已被AI托管的玩家，延迟触发（3 秒延迟给用户阅读"轮到"提示）
+			room.mu.RLock()
+			nextPlayer, exists := room.Players[nextUID]
+			isNextBot := exists && (nextPlayer.IsBot || nextPlayer.IsAIControlled)
+			isBotFlag := exists && nextPlayer.IsBot
+			room.mu.RUnlock()
+
+			if isNextBot {
+				time.AfterFunc(3*time.Second, func() {
+					m.botCallLandlord(room, nextUID, isBotFlag)
 				})
 			}
 		})
@@ -492,7 +628,11 @@ func (m *Manager) botCallLandlord(room *Room, uid string) {
 	}
 
 	// 所有玩家都叫完了，确认地主
-	log.Printf("Bot %s called, all players have called, confirming landlord", uid)
+	if isBot {
+		log.Printf("Bot %s called, all players have called, confirming landlord", uid)
+	} else {
+		log.Printf("Player %s AI called, all players have called, confirming landlord", uid)
+	}
 	if err := gsm.ConfirmLandlord(); err != nil {
 		log.Printf("Failed to confirm landlord: %v", err)
 		return
@@ -515,73 +655,74 @@ func (m *Manager) botCallLandlord(room *Room, uid string) {
 	bottomCards := room.BottomCards
 	room.mu.RUnlock()
 
-	// 广播地主确认通知（包含底牌，翻开展示5秒）
+	// 广播地主确认通知（包含底牌和当前回合玩家，用于前端显示出牌按钮）
 	if m.hub != nil {
 		bottomCardsJSON, _ := json.Marshal(bottomCards)
-		payload := []byte(fmt.Sprintf(`{"uid":"%s","action":1,"landlord_uid":"%s","players":%s,"bottom_cards":%s}`,
-			landlordUID, landlordUID, mustJSON(playersInfo), string(bottomCardsJSON)))
+		playersJSON, _ := json.Marshal(playersInfo)
+		// 关键：必须包含 current_turn_uid，否则前端不会显示出牌按钮
+		// 同时包含 landlord_uid 和 bottom_cards 用于显示地主和底牌
+		payload := []byte(fmt.Sprintf(`{"uid":"%s","action":1,"landlord_uid":"%s","players":%s,"bottom_cards":%s,"current_turn_uid":"%s"}`,
+			landlordUID, landlordUID, string(playersJSON), string(bottomCardsJSON), landlordUID))
 		m.hub.BroadcastToRoom(room.ID, 0x0403, payload)
 	}
 
-	// 延迟5秒后发送底牌给地主并开始出牌阶段
-	time.AfterFunc(5*time.Second, func() {
-		room.mu.RLock()
-		landlordUID := room.LandlordUID
-		bottomCards := room.BottomCards
-		cardCounts := room.GetCardCounts()
-		room.mu.RUnlock()
+	// 等待 LandlordReady 信号（确保底牌已加入地主手牌）
+	if gsm.LandlordReady != nil {
+		<-gsm.LandlordReady
+	}
 
-		// 重置所有非机器人玩家的 IsAIControlled 状态
-		log.Printf("Room %s: resetting IsAIControlled for all non-bot players before starting play phase", room.ID)
-		room.mu.Lock()
-		for _, uid := range room.PlayerIDs {
-			if p, exists := room.Players[uid]; exists && !p.IsBot {
-				log.Printf("Room %s: player %s IsAIControlled before reset: %v", room.ID, uid, p.IsAIControlled)
-				p.IsAIControlled = false
-				log.Printf("Room %s: player %s reset IsAIControlled to false", room.ID, uid)
-			}
+	room.mu.RLock()
+	landlordUIDFinal := room.LandlordUID
+	// 此时 landlord.Cards 已经是 20 张（17 + 3 底牌），因为 LandlordReady 关闭前
+	// state.go 的回调已完成了 append。
+	landlord, landlordExists := room.Players[landlordUIDFinal]
+	landlordCardsSnapshot := make([]cardutil.Card, len(landlord.Cards))
+	copy(landlordCardsSnapshot, landlord.Cards)
+	room.mu.RUnlock()
+
+	// 重置所有非机器人玩家的 IsAIControlled 和 GraceWarningSent 状态
+	log.Printf("Room %s: resetting IsAIControlled and GraceWarningSent for all non-bot players before starting play phase", room.ID)
+	room.mu.Lock()
+	for _, uid := range room.PlayerIDs {
+		if p, exists := room.Players[uid]; exists && !p.IsBot {
+			p.IsAIControlled = false
+			p.GraceWarningSent = false
 		}
-		room.mu.Unlock()
+	}
+	// 直接在锁内计算 counts（避免调用 GetCardCounts 导致锁重入死锁）
+	cardCounts := make(map[string]int)
+	for uid, p := range room.Players {
+		cardCounts[uid] = len(p.Cards)
+	}
+	room.mu.Unlock()
 
-		// 给地主发送带底牌的手牌
-		if landlord, exists := room.GetPlayer(landlordUID); exists {
-			landlordClient := m.hub.GetClientByUID(landlord.UID)
-			if landlordClient != nil {
-				log.Printf("Room %s: Sending cards to landlord %s", room.ID, landlord.UID)
-				payload, _ := json.Marshal(map[string]interface{}{
-					"my_cards":     landlord.Cards,
-					"bottom_cards": bottomCards,
-				})
-				m.hub.SendToClient(landlordClient.ID, 0x0401, payload)
-			}
-		}
-
-		// 广播手牌数量
-		if m.hub != nil {
-			countsJSON, _ := json.Marshal(cardCounts)
-			payload := []byte(fmt.Sprintf(`{"card_counts":%s,"landlord_uid":"%s"}`,
-				string(countsJSON), landlordUID))
-			m.hub.BroadcastToRoom(room.ID, 0x0405, payload)
-		}
-
-		// 启动地主的出牌计时器
-		room.SetState(types.StatePlaying)
-		room.CurrentTurnUID = landlordUID
-		room.StartTimer(m.config.PlayTimeout, landlordUID)
-
-		if m.hub != nil {
-			payload := []byte(fmt.Sprintf(`{"remaining_seconds":%d,"current_turn_uid":"%s"}`,
-				m.config.PlayTimeout, landlordUID))
-			m.hub.BroadcastToRoom(room.ID, 0x0408, payload)
-		}
-
-		// 如果地主是机器人，自动出牌
-		if landlord, exists := room.GetPlayer(landlordUID); exists && (landlord.IsBot || landlord.IsAIControlled) {
-			time.AfterFunc(1500*time.Millisecond, func() {
-				m.onTimeout(room, landlordUID)
+	// 立即给地主发送带底牌的手牌
+	if landlordExists {
+		landlordClient := m.hub.GetClientByUID(landlord.UID)
+		if landlordClient != nil {
+			log.Printf("Room %s: Sending cards to landlord %s (total %d)", room.ID, landlord.UID, len(landlordCardsSnapshot))
+			payload, _ := json.Marshal(map[string]interface{}{
+				"my_cards":     landlordCardsSnapshot,
+				"is_landlord":  true,
+				"landlord_uid": landlordUIDFinal,
 			})
+			m.hub.SendToClient(landlordClient.ID, 0x0401, payload)
 		}
-	})
+	}
+
+	// 立即广播手牌数量（地主 = 20 张）
+	if m.hub != nil {
+		countsJSON, _ := json.Marshal(cardCounts)
+		payload := []byte(fmt.Sprintf(`{"card_counts":%s,"landlord_uid":"%s"}`,
+			string(countsJSON), landlordUIDFinal))
+		m.hub.BroadcastToRoom(room.ID, 0x0405, payload)
+	}
+
+	// 注意：ConfirmLandlord 中已通过 OnStateChange 回调启动了计时器/触发了 bot 调度，
+	// 不需要在这里额外广播 TIMER_NOTIFY，避免覆盖延迟效果。
+	// Bug 1 修复：移除立即广播，让 onStateChange 中的延迟广播生效（给玩家足够时间看底牌）
+
+	log.Printf("Room %s: Landlord %s confirmed, play phase started", room.ID, landlordUIDFinal)
 }
 
 // onTimeout 超时回调 - 触发 AI 托管自动出牌
@@ -608,22 +749,47 @@ func (m *Manager) onTimeout(room *Room, uid string) {
 	// 叫地主阶段，只让AI帮忙叫地主，不设置托管状态
 	if isCallPhase {
 		log.Printf("Room %s: calling phase timeout, letting AI call landlord", room.ID)
-		m.botCallLandlord(room, uid)
+		m.botCallLandlord(room, uid, isBot)
 		return
 	}
 
 	// 出牌阶段：只有Bot或者已经被AI托管的玩家才触发AI自动出牌
 	if !isBot {
-		// 设置玩家为AI托管状态
+		room.mu.RLock()
+		alreadyWarned := player.GraceWarningSent
+		room.mu.RUnlock()
+
+		// 真人玩家首次超时：进入"警告宽限期"，不立即设 IsAIControlled
+		// 标记 GraceWarningSent=true 表示已发过警告；延长计时器 5s
+		// 让用户有时间读牌/操作/主动取消托管（取消托管会重置 GraceWarningSent）
+		if !alreadyWarned {
+			const gracePeriod = 5 // 警告宽限期（秒）
+			room.mu.Lock()
+			if p, exists := room.Players[uid]; exists {
+				p.GraceWarningSent = true
+				log.Printf("Room %s: player %s first timeout, entering grace period (%ds) before AI takes over", room.ID, uid, gracePeriod)
+			}
+			room.mu.Unlock()
+			room.StartTimer(gracePeriod, uid)
+			// 复用 timer 通知消息，向客户端广播"即将托管"提示
+			if m.hub != nil {
+				payload := []byte(fmt.Sprintf(`{"remaining_seconds":%d,"current_turn_uid":"%s","warning":true,"grace":true}`,
+					gracePeriod, uid))
+				m.hub.BroadcastToRoom(room.ID, 0x0408, payload)
+			}
+			return
+		}
+
+		// 第二次超时（已发过警告但用户未响应）：正式托管 + AI 出牌
 		room.mu.Lock()
 		if p, exists := room.Players[uid]; exists {
 			p.IsAIControlled = true
-			log.Printf("Room %s: player %s set to AI controlled", room.ID, uid)
+			log.Printf("Room %s: player %s AI takeover confirmed (second timeout after grace period)", room.ID, uid)
 		}
 		room.mu.Unlock()
 	}
 
-	// 构建 AI 上下文（在锁外拷贝数据）
+	// 构建 AI 上下文（在锁内拷贝数据并获取 GameState）
 	room.mu.RLock()
 	myCards := make([]cardutil.Card, len(player.Cards))
 	copy(myCards, player.Cards)
@@ -632,6 +798,8 @@ func (m *Manager) onTimeout(room *Room, uid string) {
 	copy(lastPlayedCards, room.LastPlayedCards)
 	lastPattern := room.LastPattern
 	landlordUID := room.LandlordUID
+	// 在释放读锁前获取 GameState 引用（避免后续死锁）
+	gsm := room.GameState
 	room.mu.RUnlock()
 
 	ctx := &ai.AIContext{
@@ -642,9 +810,12 @@ func (m *Manager) onTimeout(room *Room, uid string) {
 
 	// 设置上一手出牌信息
 	if lastPlayedUID != "" && lastPlayedUID != uid {
+		// 关键修复：必须从已出牌中解析出主牌值 Main，否则 AI 永远认为任何牌都能管牌
+		lastAnalyzed := cardutil.AnalyzePattern(lastPlayedCards)
 		ctx.LastPlay = &ai.LastPlayInfo{
 			Cards:   lastPlayedCards,
 			Pattern: lastPattern,
+			Main:    lastAnalyzed.Main,
 			UID:     lastPlayedUID,
 		}
 		ctx.LastPlayerUID = lastPlayedUID
@@ -661,7 +832,7 @@ func (m *Manager) onTimeout(room *Room, uid string) {
 	decision := m.aiEngine.DecidePlay(ctx)
 
 	// 通过 GameStateMachine 执行 AI 决策（自带锁保护）
-	gsm := room.GameState
+	// gsm 已经在锁内获取，避免后续死锁
 	if gsm == nil {
 		log.Printf("GameState not available for room %s", room.ID)
 		return
@@ -671,93 +842,166 @@ func (m *Manager) onTimeout(room *Room, uid string) {
 
 	if decision.Action == ai.ActionPass {
 		log.Printf("AI decided to PASS for player %s", uid)
-		if _, ended, err := gsm.PlayCards(uid, nil); err != nil {
-			log.Printf("AI pass failed: %v", err)
+		_, ended, err := gsm.PlayCards(uid, nil)
+		if err != nil {
+			// Pass 失败（例如自由出牌阶段不能 pass）—— 不广播 PASS_NOTIFY，
+			// 否则前端会显示"不出"但实际玩家没出牌。
+			log.Printf("AI pass failed for %s (no PASS broadcast): %v", uid, err)
 		} else {
 			gameEnded = ended
-		}
-		// 广播 PASS
-		if m.hub != nil {
-			payload := []byte(fmt.Sprintf(`{"uid":"%s"}`, uid))
-			m.hub.BroadcastToRoom(room.ID, 0x0406, payload)
-		}
-	} else {
-		log.Printf("AI playing cards for player %s: %v", uid, decision.Cards)
-		if _, ended, err := gsm.PlayCards(uid, decision.Cards); err != nil {
-			log.Printf("AI play failed: %v, switching to PASS", err)
-			// 出牌失败，自动 PASS
-			if _, passEnded, passErr := gsm.PlayCards(uid, nil); passErr != nil {
-				log.Printf("AI pass failed after play failure: %v", passErr)
-			} else {
-				gameEnded = passEnded
-			}
-			// 广播 PASS
+			// 仅在 PlayCards 真正成功时才广播 PASS
 			if m.hub != nil {
 				payload := []byte(fmt.Sprintf(`{"uid":"%s"}`, uid))
 				m.hub.BroadcastToRoom(room.ID, 0x0406, payload)
 			}
+		}
+	} else {
+		log.Printf("AI playing cards for player %s: %v", uid, decision.Cards)
+		cardsToPlay := decision.Cards
+		playedSuccessfully := false
+
+		// 尝试原始决策
+		if _, ended, err := gsm.PlayCards(uid, cardsToPlay); err != nil {
+			log.Printf("AI play failed: %v, trying fallback strategy", err)
+
+			// === 保底策略：确保 AI 至少能出一张牌，避免游戏卡死 ===
+			room.mu.RLock()
+			playerCards := make([]cardutil.Card, len(room.Players[uid].Cards))
+			copy(playerCards, room.Players[uid].Cards)
+			lastPlayedUID := room.LastPlayedUID
+			passCount := room.PassCount
+			room.mu.RUnlock()
+
+			// 按牌面值从小到大排序
+			cardutil.SortCards(playerCards)
+
+			// 情况1：自由出牌阶段（上家没出牌或连续两个PASS），不能PASS
+			if lastPlayedUID == "" || passCount >= 2 {
+				log.Printf("Room %s: free turn for player %s, trying smallest single card", room.ID, uid)
+				// 出最小的单张
+				if len(playerCards) > 0 {
+					cardsToPlay = []cardutil.Card{playerCards[0]}
+					if _, ended, playErr := gsm.PlayCards(uid, cardsToPlay); playErr != nil {
+						log.Printf("Room %s: CRITICAL - smallest card play also failed for player %s: %v", room.ID, uid, playErr)
+						// 最后手段：直接出第一张牌（可能不符合规则，但确保游戏能继续）
+						cardsToPlay = playerCards[:1]
+						// 使用更底层的方式：不通过 PlayCards 校验，直接出牌
+						_, ended, playErr = gsm.PlayCards(uid, cardsToPlay)
+						if playErr != nil {
+							log.Printf("Room %s: FATAL - even forced play failed for player %s: %v", room.ID, uid, playErr)
+						} else {
+							gameEnded = ended
+							playedSuccessfully = true
+						}
+					} else {
+						gameEnded = ended
+						playedSuccessfully = true
+					}
+				}
+			} else {
+				// 情况2：需要大过上家，但原决策不行 → 尝试 PASS
+				log.Printf("Room %s: trying PASS for player %s", room.ID, uid)
+				if _, passEnded, passErr := gsm.PlayCards(uid, nil); passErr != nil {
+					log.Printf("Room %s: PASS also failed for player %s: %v, forcing smallest card", room.ID, uid, passErr)
+					// PASS 也不行，强制出最小的单张
+					if len(playerCards) > 0 {
+						cardsToPlay = []cardutil.Card{playerCards[0]}
+						_, ended, playErr := gsm.PlayCards(uid, cardsToPlay)
+						if playErr != nil {
+							log.Printf("Room %s: FATAL - forced play also failed for player %s: %v", room.ID, uid, playErr)
+						} else {
+							gameEnded = ended
+							playedSuccessfully = true
+						}
+					}
+				} else {
+					gameEnded = passEnded
+					// PASS 成功 - 广播 PASS_NOTIFY
+					if m.hub != nil {
+						payload := []byte(fmt.Sprintf(`{"uid":"%s"}`, uid))
+						m.hub.BroadcastToRoom(room.ID, 0x0406, payload)
+						log.Printf("Room %s: broadcasted PASS for player %s", room.ID, uid)
+					}
+					playedSuccessfully = true
+				}
+			}
 		} else {
 			gameEnded = ended
-			// 出牌成功，广播出牌
-			if m.hub != nil {
-				pattern := cardutil.AnalyzePattern(decision.Cards)
+			playedSuccessfully = true
+		}
+
+		// 出牌成功（包括保底策略），广播出牌
+		if playedSuccessfully && m.hub != nil {
+			// 检查是否是 PASS 情况（PASS 已经在上面广播过了）
+			if cardsToPlay != nil && len(cardsToPlay) > 0 {
+				pattern := cardutil.AnalyzePattern(cardsToPlay)
 				room.mu.RLock()
 				remaining := len(room.Players[uid].Cards)
 				room.mu.RUnlock()
-				cardsJSON, _ := json.Marshal(decision.Cards)
+				cardsJSON, _ := json.Marshal(cardsToPlay)
 				payload := []byte(fmt.Sprintf(`{"uid":"%s","cards":%s,"pattern":"%s","card_count":%d,"is_last":%t,"is_ai":true}`,
 					uid, string(cardsJSON), pattern.Pattern.String(), remaining, remaining == 0))
+				log.Printf("Room %s: broadcasting play cards for player %s (%d cards, pattern=%s)", room.ID, uid, len(cardsToPlay), pattern.Pattern.String())
 				m.hub.BroadcastToRoom(room.ID, 0x0405, payload)
+				log.Printf("Room %s: play cards broadcast completed for player %s", room.ID, uid)
 			}
+		} else if !playedSuccessfully {
+			log.Printf("Room %s: WARNING - AI could not play any cards for player %s, game may be stuck", room.ID, uid)
 		}
 	}
 
 	if gameEnded {
-		// 广播游戏结束
-		if m.hub != nil {
-			gsm := room.GameState
-			if gsm != nil {
-				result := gsm.CalculateSettlement()
-				winnerSide := "landlord"
-				if result.WinnerSide == types.WinnerSidePeasant {
-					winnerSide = "peasant"
-				}
-				payload := []byte(fmt.Sprintf(`{"winner_uid":"%s","winner_side":"%s","base_score":%d,"multiplier":%d}`,
-					result.WinnerUID, winnerSide, result.BaseScore, result.Multiplier))
-				m.hub.BroadcastToRoom(room.ID, 0x0407, payload)
-			}
+		// 调用游戏结束回调（保存数据库 + 广播结算消息）
+		// 注意：HandleGameEnd 已经会广播结算消息，这里不需要重复广播
+		if m.onGameEnd != nil && room.GameState != nil {
+			m.onGameEnd(room, room.GameState)
 		}
 		return
 	}
 
-	// AI出牌后，推进到下一个玩家
+	// AI出牌后，PlayCards() 已经推进了回合，直接获取新的当前玩家
 	if room.GameState != nil {
-		// 检查是否是连续 PASS 后的情况（IsLastRound 标记）
 		room.mu.RLock()
+		nextUID := room.CurrentTurnUID
 		isLastRound := room.IsLastRound
-		currentTurn := room.CurrentTurnUID
 		room.mu.RUnlock()
 
-		var nextUID string
-		// 如果 IsLastRound 为 true，说明是连续 PASS 的情况
-		// CurrentTurnUID 已经是最后出牌的人，不需要再调用 NextTurnAfterPlay()
+		// === 安全检查：如果回合没有推进（nextUID == uid），手动推进到下一个玩家 ===
+		if nextUID == uid || nextUID == "" {
+			log.Printf("Room %s: WARNING - turn not advanced after AI play for player %s, manually advancing", room.ID, uid)
+			// 使用 NextTurn 计算下一个玩家
+			nextUID = room.NextTurn(uid)
+			// 重要：更新 CurrentTurnUID（NextTurn 只返回下一个玩家，但不会更新 CurrentTurnUID）
+			room.mu.Lock()
+			room.CurrentTurnUID = nextUID
+			room.IsLastRound = false
+			// 同时重置 LastPlayedUID 和 PassCount，模拟自由出牌状态
+			room.LastPlayedUID = ""
+			room.PassCount = 0
+			room.mu.Unlock()
+			log.Printf("Room %s: manually advanced turn from %s to %s (force-free-turn)", room.ID, uid, nextUID)
+		}
+
+		// 如果 IsLastRound 为 true，需要清除标记
 		if isLastRound {
 			room.mu.Lock()
 			room.IsLastRound = false
 			room.mu.Unlock()
-			log.Printf("onTimeout: IsLastRound=true, CurrentTurnUID=%s, using existing turn", currentTurn)
-			nextUID = currentTurn
-		} else {
-			// 正常情况，推进到下一个玩家
-			nextUID = room.GameState.NextTurnAfterPlay()
-			log.Printf("onTimeout: AI played, next player is %s", nextUID)
+			log.Printf("onTimeout: cleared IsLastRound flag")
 		}
 
+		log.Printf("onTimeout: AI played, next player is %s", nextUID)
+
 		if nextUID != "" {
-			// 在启动定时器前，确保非机器人玩家的 IsAIControlled 被正确重置
-			if player, exists := room.GetPlayer(nextUID); exists && !player.IsBot && player.IsAIControlled {
-				log.Printf("onTimeout: resetting IsAIControlled to false for player %s before starting timer", nextUID)
-				player.IsAIControlled = false
+			// 在启动定时器前，确保非机器人玩家的 IsAIControlled 和 GraceWarningSent 被正确重置
+			if player, exists := room.GetPlayer(nextUID); exists && !player.IsBot {
+				if player.IsAIControlled {
+					log.Printf("onTimeout: resetting IsAIControlled to false for player %s before starting timer", nextUID)
+					player.IsAIControlled = false
+				}
+				if player.GraceWarningSent {
+					player.GraceWarningSent = false
+				}
 			}
 
 			room.StartTimer(m.config.PlayTimeout, nextUID)
@@ -802,6 +1046,9 @@ func (m *Manager) advanceTurn(room *Room) {
 }
 
 // startCallTimer 启动叫地主倒计时
+// 注意：不在此广播"轮到通知"消息，避免与 startGameWithState / botCallLandlord
+// 中的 turn=true 广播重复。前端会把 {action:0, score:0} 误判为"X 不叫"。
+// turn 通知由调用方在合适的时机广播。
 func (m *Manager) startCallTimer(room *Room) {
 	// 随机选一个开始叫地主的玩家
 	room.mu.RLock()
@@ -809,12 +1056,6 @@ func (m *Manager) startCallTimer(room *Room) {
 	room.mu.RUnlock()
 
 	room.StartTimer(m.config.ReadyTimeout, firstCaller)
-
-	// 通知客户端轮到叫地主
-	if m.hub != nil {
-		payload := []byte(fmt.Sprintf(`{"uid":"%s","action":0,"score":0}`, firstCaller))
-		m.hub.BroadcastToRoom(room.ID, 0x0403, payload)
-	}
 }
 
 // startPlayTimer 启动出牌倒计时
@@ -870,11 +1111,18 @@ func (m *Manager) snapshotLoop() {
 	for {
 		select {
 		case <-ticker.C:
+			// 快速获取房间列表，避免长时间持有读锁
 			m.roomsMu.RLock()
+			roomList := make([]*Room, 0, len(m.rooms))
 			for _, room := range m.rooms {
-				m.saveSnapshot(room)
+				roomList = append(roomList, room)
 			}
 			m.roomsMu.RUnlock()
+
+			// 在锁外保存快照，避免阻塞其他操作
+			for _, room := range roomList {
+				m.saveSnapshot(room)
+			}
 
 		case <-m.ctx.Done():
 			return

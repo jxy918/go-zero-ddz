@@ -32,12 +32,12 @@ type CallRecord struct {
 
 // PlayerInfo 玩家信息
 type PlayerInfo struct {
-	UID              string
-	Nickname         string
-	IsLandlord       bool
-	IsBot            bool
-	IsAIControlled   bool
-	CardCount        int
+	UID            string
+	Nickname       string
+	IsLandlord     bool
+	IsBot          bool
+	IsAIControlled bool
+	CardCount      int
 }
 
 // MatchResult 匹配结果

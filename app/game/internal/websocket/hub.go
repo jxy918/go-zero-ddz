@@ -5,15 +5,15 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"go-zero-ddz/app/game/internal/config"
-
 	"github.com/gorilla/websocket"
+	"github.com/zeromicro/go-zero/core/logx"
+
+	"go-zero-ddz/app/game/internal/config"
 )
 
 // MessageHandler 消息处理函数
@@ -25,8 +25,9 @@ type Hub struct {
 	upgrader websocket.Upgrader
 
 	// 已注册的客户端
-	clients   map[string]*Client
-	clientsMu sync.RWMutex
+	clients      map[string]*Client
+	clientsByUID map[string]*Client
+	clientsMu    sync.RWMutex
 
 	// 消息处理器注册表
 	handlers   map[uint16]MessageHandler
@@ -39,6 +40,21 @@ type Hub struct {
 	// 服务状态
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// 连接统计
+	stats      ConnectionStats
+	statsMu    sync.Mutex
+	maxClients int
+}
+
+// ConnectionStats 连接统计
+type ConnectionStats struct {
+	TotalConnections   int64
+	CurrentConnections int
+	MaxConnections     int
+	MessageCount       int64
+	ErrorCount         int64
+	LastResetTime      time.Time
 }
 
 // NewHub 创建 Hub
@@ -46,7 +62,8 @@ func NewHub(cfg *config.WebSocketConfig) *Hub {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Hub{
-		config: cfg,
+		config:     cfg,
+		maxClients: 10000, // 默认最大连接数
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  cfg.ReadBufferSize,
 			WriteBufferSize: cfg.WriteBufferSize,
@@ -54,48 +71,108 @@ func NewHub(cfg *config.WebSocketConfig) *Hub {
 				return true // 生产环境需要验证 Origin
 			},
 		},
-		clients:    make(map[string]*Client),
-		handlers:   make(map[uint16]MessageHandler),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		ctx:        ctx,
-		cancel:     cancel,
+		clients:      make(map[string]*Client),
+		clientsByUID: make(map[string]*Client),
+		handlers:     make(map[uint16]MessageHandler),
+		register:     make(chan *Client),
+		unregister:   make(chan *Client),
+		ctx:          ctx,
+		cancel:       cancel,
+		stats: ConnectionStats{
+			LastResetTime: time.Now(),
+		},
+	}
+}
+
+// SetMaxClients 设置最大连接数
+func (h *Hub) SetMaxClients(max int) {
+	h.maxClients = max
+}
+
+// GetStats 获取连接统计
+func (h *Hub) GetStats() ConnectionStats {
+	h.statsMu.Lock()
+	defer h.statsMu.Unlock()
+	return h.stats
+}
+
+// ResetStats 重置统计
+func (h *Hub) ResetStats() {
+	h.statsMu.Lock()
+	defer h.statsMu.Unlock()
+	h.stats = ConnectionStats{
+		CurrentConnections: h.stats.CurrentConnections,
+		LastResetTime:      time.Now(),
+	}
+}
+
+// incrStats 增加统计计数
+func (h *Hub) incrStats(field string) {
+	h.statsMu.Lock()
+	defer h.statsMu.Unlock()
+	switch field {
+	case "connections":
+		h.stats.TotalConnections++
+		h.stats.CurrentConnections++
+		if h.stats.CurrentConnections > h.stats.MaxConnections {
+			h.stats.MaxConnections = h.stats.CurrentConnections
+		}
+	case "disconnections":
+		h.stats.CurrentConnections--
+	case "messages":
+		h.stats.MessageCount++
+	case "errors":
+		h.stats.ErrorCount++
 	}
 }
 
 // Run 启动 Hub 主循环
 func (h *Hub) Run() {
-	log.Println("WebSocket Hub started")
+	logx.Info("WebSocket Hub started")
 
-	// 启动心跳检查
 	go h.heartbeatCheck()
 
 	for {
 		select {
 		case client := <-h.register:
 			h.clientsMu.Lock()
+			if len(h.clients) >= h.maxClients {
+				h.clientsMu.Unlock()
+				logx.Infof("Client %s rejected: max connections reached (%d)", client.ID, h.maxClients)
+				client.Close()
+				continue
+			}
 			h.clients[client.ID] = client
+			if client.UID != "" {
+				h.clientsByUID[client.UID] = client
+			}
 			count := len(h.clients)
 			h.clientsMu.Unlock()
-			log.Printf("Client registered: %s (total: %d)", client.ID, count)
+			h.incrStats("connections")
+			logx.Infof("Client registered: %s (total: %d)", client.ID, count)
 
 		case client := <-h.unregister:
 			h.clientsMu.Lock()
 			if _, ok := h.clients[client.ID]; ok {
 				delete(h.clients, client.ID)
+				if client.UID != "" {
+					delete(h.clientsByUID, client.UID)
+				}
 			}
 			count := len(h.clients)
 			h.clientsMu.Unlock()
 			client.Close()
-			log.Printf("Client unregistered: %s (total: %d)", client.ID, count)
+			h.incrStats("disconnections")
+			logx.Infof("Client unregistered: %s (total: %d)", client.ID, count)
 
 		case <-h.ctx.Done():
-			log.Println("WebSocket Hub stopping...")
+			logx.Info("WebSocket Hub stopping...")
 			h.clientsMu.Lock()
 			for id, client := range h.clients {
 				client.Close()
 				delete(h.clients, id)
 			}
+			h.clientsByUID = make(map[string]*Client)
 			h.clientsMu.Unlock()
 			return
 		}
@@ -106,27 +183,24 @@ func (h *Hub) Run() {
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade error: %v", err)
+		logx.Infof("WebSocket upgrade error: %v", err)
 		return
 	}
 
-	// 生成客户端 ID
 	clientID := fmt.Sprintf("conn-%d", time.Now().UnixNano())
 	client := NewClient(clientID, conn, 256)
 
-	// 从 URL 参数中提取 token 并解析 UID
 	token := r.URL.Query().Get("token")
 	if token != "" {
 		uid := extractUIDFromToken(token)
 		if uid != "" {
 			client.UID = uid
-			log.Printf("Client %s auto-login with UID: %s", clientID, uid)
+			logx.Infof("Client %s auto-login with UID: %s", clientID, uid)
 		}
 	}
 
 	h.register <- client
 
-	// 启动读写循环
 	go h.readPump(client)
 	go h.writePump(client)
 }
@@ -181,42 +255,37 @@ func (h *Hub) readPump(client *Client) {
 		client.mu.RUnlock()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				log.Printf("Client %s unexpected disconnect: %v", client.ID, err)
+				logx.Infof("Client %s unexpected disconnect: %v", client.ID, err)
 			}
 			return
 		}
 
-		log.Printf("Client %s received raw message: %d bytes, first 10 bytes: %v", client.ID, len(message), message[:min(len(message), 10)])
+		logx.Infof("Client %s received raw message: %d bytes, first 10 bytes: %v", client.ID, len(message), message[:min(len(message), 10)])
 
-		// 解码消息
 		msgID, payload, err := DecodeFromBytes(message)
 		if err != nil {
-			log.Printf("Client %s decode error: %v", client.ID, err)
+			logx.Infof("Client %s decode error: %v", client.ID, err)
 			continue
 		}
 
-		log.Printf("Client %s decoded message: msgID=0x%04X, payload length=%d", client.ID, msgID, len(payload))
+		logx.Infof("Client %s decoded message: msgID=0x%04X, payload length=%d", client.ID, msgID, len(payload))
 
-		// 心跳消息
 		if msgID == 0x0001 {
 			client.UpdateHeartbeat()
-			// 回复心跳
-			h.sendHeartbeatResp(client)
+			h.sendHeartbeatRespSafe(client)
 			continue
 		}
 
-		// 分发到处理器
 		h.handlersMu.RLock()
 		handler, exists := h.handlers[msgID]
 		h.handlersMu.RUnlock()
 
 		if !exists {
-			log.Printf("No handler for message ID: 0x%04X", msgID)
+			logx.Infof("No handler for message ID: 0x%04X", msgID)
 			continue
 		}
 
-		log.Printf("Dispatching message 0x%04X to handler", msgID)
-		// 异步处理消息
+		logx.Infof("Dispatching message 0x%04X to handler", msgID)
 		go handler(client, msgID, payload)
 	}
 }
@@ -250,12 +319,11 @@ func (h *Hub) writePump(client *Client) {
 			err := client.Conn.WriteMessage(websocket.BinaryMessage, message)
 			client.mu.RUnlock()
 			if err != nil {
-				log.Printf("Client %s write error: %v", client.ID, err)
+				logx.Infof("Client %s write error: %v", client.ID, err)
 				return
 			}
 
 		case <-ticker.C:
-			// 发送 Ping 帧
 			client.mu.RLock()
 			if client.Conn == nil {
 				client.mu.RUnlock()
@@ -265,7 +333,7 @@ func (h *Hub) writePump(client *Client) {
 			err := client.Conn.WriteMessage(websocket.PingMessage, nil)
 			client.mu.RUnlock()
 			if err != nil {
-				log.Printf("Client %s ping error: %v", client.ID, err)
+				logx.Infof("Client %s ping error: %v", client.ID, err)
 				return
 			}
 		}
@@ -277,14 +345,14 @@ func (h *Hub) RegisterHandler(msgID uint16, handler MessageHandler) {
 	h.handlersMu.Lock()
 	defer h.handlersMu.Unlock()
 	h.handlers[msgID] = handler
-	log.Printf("Registered handler for message ID: 0x%04X", msgID)
+	logx.Infof("Registered handler for message ID: 0x%04X", msgID)
 }
 
 // BroadcastToRoom 向房间内所有客户端广播消息
 func (h *Hub) BroadcastToRoom(roomID string, msgID uint16, payload []byte) {
 	data, err := Encode(msgID, payload)
 	if err != nil {
-		log.Printf("Encode broadcast message error: %v", err)
+		logx.Infof("Encode broadcast message error: %v", err)
 		return
 	}
 
@@ -296,7 +364,7 @@ func (h *Hub) BroadcastToRoom(roomID string, msgID uint16, payload []byte) {
 			select {
 			case client.Send <- data:
 			default:
-				log.Printf("Client %s send buffer full, skipping broadcast", client.ID)
+				logx.Infof("Client %s send buffer full, skipping broadcast", client.ID)
 			}
 		}
 	}
@@ -337,10 +405,9 @@ func (h *Hub) GetClientByUID(uid string) *Client {
 	h.clientsMu.RLock()
 	defer h.clientsMu.RUnlock()
 
-	for _, client := range h.clients {
-		if client.UID == uid {
-			return client
-		}
+	// 优先使用索引查找
+	if client, exists := h.clientsByUID[uid]; exists {
+		return client
 	}
 	return nil
 }
@@ -358,7 +425,7 @@ func (h *Hub) heartbeatCheck() {
 			h.clientsMu.RLock()
 			for _, client := range h.clients {
 				if time.Since(client.LastHeartbeat()) > pongWait {
-					log.Printf("Client %s heartbeat timeout, disconnecting", client.ID)
+					logx.Infof("Client %s heartbeat timeout, disconnecting", client.ID)
 					go func(c *Client) {
 						h.unregister <- c
 						c.Close()
@@ -377,13 +444,28 @@ func (h *Hub) heartbeatCheck() {
 func (h *Hub) sendHeartbeatResp(client *Client) {
 	resp, err := Encode(0x0002, []byte("{}"))
 	if err != nil {
-		log.Printf("encode heartbeat resp error: %v", err)
+		logx.Infof("encode heartbeat resp error: %v", err)
 		return
 	}
+
 	select {
 	case client.Send <- resp:
 	default:
 	}
+}
+
+// sendHeartbeatRespSafe 安全发送心跳响应（带关闭检查）
+func (h *Hub) sendHeartbeatRespSafe(client *Client) {
+	h.clientsMu.RLock()
+	_, exists := h.clients[client.ID]
+	h.clientsMu.RUnlock()
+
+	if !exists {
+		logx.Infof("Client %s not found, skip heartbeat response", client.ID)
+		return
+	}
+
+	h.sendHeartbeatResp(client)
 }
 
 // Stop 停止 Hub
