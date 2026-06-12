@@ -2,11 +2,12 @@ package game
 
 import (
 	"database/sql"
-	"log"
 
 	"go-zero-ddz/app/game/internal/room"
 	"go-zero-ddz/app/game/internal/websocket"
 	"go-zero-ddz/pkg/cardutil"
+
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 // GameLogic 游戏逻辑管理器
@@ -39,47 +40,48 @@ func NewGameLogic(hub *websocket.Hub, roomMgr *room.Manager, db *sql.DB, msgType
 
 // HandlePlayCards 处理出牌请求
 func (gl *GameLogic) HandlePlayCards(client *websocket.Client, cards []cardutil.Card, msgID uint16, sendError func(*websocket.Client, uint16, int, string), broadcastMsg func(string, uint16, interface{})) {
-	log.Printf("=== GameLogic.HandlePlayCards START ===")
-	log.Printf("client=%s, UID=%s, RoomID=%s, cards=%v", client.ID, client.UID, client.RoomID, cards)
+	logx.Infof("=== GameLogic.HandlePlayCards START ===")
+	logx.Infof("client=%s, UID=%s, RoomID=%s, cards=%v", client.ID, client.UID, client.RoomID, cards)
 
-	log.Printf("Looking up room: %s", client.RoomID)
+	logx.Infof("Looking up room: %s", client.RoomID)
 	r, exists := gl.roomMgr.GetRoom(client.RoomID)
 	if !exists {
-		log.Printf("ERROR: Room not found: %s", client.RoomID)
+		logx.Errorf("ERROR: Room not found: %s", client.RoomID)
 		sendError(client, msgID, 404, "room not found")
 		return
 	}
-	log.Printf("Room found: %s, player count: %d", r.ID, len(r.Players))
+	logx.Infof("Room found: %s, player count: %d", r.ID, len(r.Players))
 
-	log.Printf("Getting game state for room: %s", r.ID)
+	logx.Infof("Getting game state for room: %s", r.ID)
 	gsm := r.GetGameState()
 	if gsm == nil {
-		log.Printf("ERROR: Game state is nil for room: %s", r.ID)
+		logx.Errorf("ERROR: Game state is nil for room: %s", r.ID)
 		sendError(client, msgID, 500, "game not started")
 		return
 	}
-	log.Printf("Game state found")
+	logx.Infof("Game state found")
 
-	log.Printf("HandlePlayCards: client=%s, UID=%s, room=%s, cards=%v, currentTurn=%s",
+	logx.Infof("HandlePlayCards: client=%s, UID=%s, room=%s, cards=%v, currentTurn=%s",
 		client.ID, client.UID, client.RoomID, cards, r.CurrentTurnUID)
 
 	// 用户手动出牌，取消AI托管
 	if player, exists := r.GetPlayer(client.UID); exists && !player.IsBot {
 		player.IsAIControlled = false
-		log.Printf("HandlePlayCards: player %s manual play, AI control disabled", client.UID)
+		player.GraceWarningSent = false
+		logx.Infof("HandlePlayCards: player %s manual play, AI control disabled", client.UID)
 	}
 
 	result, gameEnded, err := gsm.PlayCards(client.UID, cards)
 	if err != nil {
-		log.Printf("HandlePlayCards: PlayCards failed for %s: %v", client.UID, err)
+		logx.Errorf("HandlePlayCards: PlayCards failed for %s: %v", client.UID, err)
 		sendError(client, msgID, 500, err.Error())
 		return
 	}
 
-	log.Printf("HandlePlayCards: PlayCards success for %s: gameEnded=%v", client.UID, gameEnded)
+	logx.Infof("HandlePlayCards: PlayCards success for %s: gameEnded=%v", client.UID, gameEnded)
 
 	if result == nil {
-		log.Printf("HandlePlayCards: player %s passed", client.UID)
+		logx.Infof("HandlePlayCards: player %s passed", client.UID)
 		broadcastMsg(client.RoomID, gl.msgTypes.MsgPassNotify, map[string]interface{}{
 			"uid": client.UID,
 		})
@@ -95,23 +97,31 @@ func (gl *GameLogic) HandlePlayCards(client *websocket.Client, cards []cardutil.
 	}
 
 	if gameEnded {
-		log.Printf("HandlePlayCards: Game ended after player %s played last card", client.UID)
+		logx.Infof("HandlePlayCards: Game ended after player %s played last card", client.UID)
 		gl.HandleGameEnd(r, gsm, broadcastMsg)
 		return
 	}
 
-	log.Printf("HandlePlayCards: Game continues, currentTurn=%s", r.CurrentTurnUID)
+	logx.Infof("HandlePlayCards: Game continues, currentTurn=%s", r.CurrentTurnUID)
 
-	nextUID := gsm.NextTurnAfterPlay()
-	log.Printf("HandlePlayCards: next player is %s, starting timer", nextUID)
+	// 从 room 直接获取下一个玩家的 UID（PlayCards 已在内部推进回合）
+	nextUID := r.CurrentTurnUID
+	logx.Infof("HandlePlayCards: next player is %s, starting timer", nextUID)
 	if nextUID != "" {
-		// 清除 IsLastRound 标记，因为有玩家出了牌，不是连续 PASS 的情况
-		r.IsLastRound = false
+		// 如果是出牌成功，清除 IsLastRound 标记
+		if result != nil {
+			r.IsLastRound = false
+		}
 
-		// 在启动定时器前，确保非机器人玩家的 IsAIControlled 被正确重置
-		if player, exists := r.GetPlayer(nextUID); exists && !player.IsBot && player.IsAIControlled {
-			log.Printf("HandlePlayCards: resetting IsAIControlled to false for player %s before starting timer", nextUID)
-			player.IsAIControlled = false
+		// 在启动定时器前，确保非机器人玩家的 IsAIControlled 和 GraceWarningSent 被正确重置
+		if player, exists := r.GetPlayer(nextUID); exists && !player.IsBot {
+			if player.IsAIControlled {
+				logx.Infof("HandlePlayCards: resetting IsAIControlled to false for player %s before starting timer", nextUID)
+				player.IsAIControlled = false
+			}
+			if player.GraceWarningSent {
+				player.GraceWarningSent = false
+			}
 		}
 
 		r.StartTimer(15, nextUID)

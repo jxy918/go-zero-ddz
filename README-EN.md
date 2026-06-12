@@ -1,5 +1,8 @@
 # go-zero-ddz
 
+![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=flat&logo=go)
+![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat)
+![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-blue?style=flat)
 
 A classic three-player DouDiZhu (Landlord) online card game, built with go-zero backend + Web frontend.
 
@@ -196,14 +199,37 @@ go mod tidy
 make docker-up
 
 # 4. Start User API service
-go run app/user/user.go -f app/user/etc/user-api.yaml
+make run-user
 
 # 5. Start Game WebSocket service
-go run app/game/cmd/server/main.go -f app/game/etc/game-local.yaml
+make run-game
 
 # 6. Open browser and visit
 # http://localhost:8080/
 ```
+
+### Quick Start/Stop Scripts
+
+```bash
+# Windows
+start.bat          # Start all services
+stop.bat           # Stop all services
+
+# Linux / macOS
+./start.sh         # Start all services
+./stop.sh          # Stop all services
+```
+
+### Scripts Description
+
+| Script | Platform | Function |
+|--------|----------|----------|
+| `start.bat` | Windows | Build binaries, check ports, start game-service and user-api |
+| `stop.bat` | Windows | Stop game-service and user-api, cleanup residual processes |
+| `start.sh` | Linux/macOS | Build binaries, check ports, start services in background |
+| `stop.sh` | Linux/macOS | Graceful shutdown (SIGTERM → SIGKILL) |
+
+Scripts automatically: compile binaries → check port availability → start services → display access URLs
 
 ### API Endpoints
 

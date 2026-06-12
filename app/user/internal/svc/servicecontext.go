@@ -16,18 +16,18 @@ import (
 
 // User 用户模型
 type User struct {
-	UID        string    `db:"uid"`
-	Username   string    `db:"username"`
-	Password   string    `db:"password"`
-	Nickname   string    `db:"nickname"`
-	AvatarID   uint32    `db:"avatar_id"`
-	ELO        int32     `db:"elo"`
-	Tier       string    `db:"tier"`
-	Gold       int32     `db:"gold"`
-	Wins       int32     `db:"wins"`
-	Losses     int32     `db:"losses"`
-	CreatedAt  time.Time `db:"created_at"`
-	UpdatedAt  time.Time `db:"updated_at"`
+	UID       string    `db:"uid"`
+	Username  string    `db:"username"`
+	Password  string    `db:"password"`
+	Nickname  string    `db:"nickname"`
+	AvatarID  uint32    `db:"avatar_id"`
+	ELO       int32     `db:"elo"`
+	Tier      string    `db:"tier"`
+	Gold      int32     `db:"gold"`
+	Wins      int32     `db:"wins"`
+	Losses    int32     `db:"losses"`
+	CreatedAt time.Time `db:"created_at"`
+	UpdatedAt time.Time `db:"updated_at"`
 }
 
 type ServiceContext struct {
@@ -138,8 +138,8 @@ func (s *ServiceContext) GetUserByUID(uid string) (*User, error) {
 // CreateUser 创建用户
 func (s *ServiceContext) CreateUser(user *User) error {
 	if s.DB == nil {
-	// 内存模式：不持久化，仅返回成功
-	logx.Infof("[Memory Mode] User created: %s (%s)", user.UID, user.Username)
+		// 内存模式：不持久化，仅返回成功
+		logx.Infof("[Memory Mode] User created: %s (%s)", user.UID, user.Username)
 		return nil
 	}
 

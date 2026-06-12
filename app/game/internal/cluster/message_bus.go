@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 type MessageType string
@@ -105,7 +105,7 @@ func (mb *MessageBus) listenLoop(ctx context.Context) {
 			}
 			var clusterMsg ClusterMessage
 			if err := json.Unmarshal([]byte(msg.Payload), &clusterMsg); err != nil {
-				log.Printf("failed to unmarshal cluster message: %v", err)
+				logx.Errorf("failed to unmarshal cluster message: %v", err)
 				continue
 			}
 			handler(&clusterMsg)
@@ -157,7 +157,7 @@ func isBroadcastChannel(ch string) bool { return len(ch) > 9 && ch[len(ch)-9:] =
 func isControlChannel(ch string) bool   { return len(ch) > 7 && ch[len(ch)-7:] == "control" }
 func isPlayChannel(ch string) bool      { return len(ch) > 4 && ch[len(ch)-4:] == "play" }
 
-func (mb *MessageBus) isRoomOwner(roomID string) bool { return true }
+func (mb *MessageBus) isRoomOwner(roomID string) bool                     { return true }
 func (mb *MessageBus) handleBroadcast(roomID string, msg *ClusterMessage) {}
 func (mb *MessageBus) handleControl(roomID string, msg *ClusterMessage)   {}
 func (mb *MessageBus) handlePlay(roomID string, msg *ClusterMessage)      {}

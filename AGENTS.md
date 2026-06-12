@@ -196,6 +196,8 @@ go-zero-ddz/
 ### 4.1 通用 Go 规范
 
 - **Go 版本**: 1.25（使用 `go 1.25.1`）
+- **文件编码**: **强制使用 UTF-8 编码（无 BOM）**，禁止使用 GBK、GB2312 等其他编码
+- **编辑器设置**: 所有开发者必须将编辑器默认编码设置为 UTF-8
 - **格式化**: `go fmt`（强制），不允许 `goimports` 以外的格式化器
 - **导入顺序**: 标准库 → 第三方库 → 内部包（空行分隔）
 - **命名**:
@@ -307,10 +309,40 @@ Redis ZSet: ddz:match:queue:*
 
 | 触发条件 | 行为 |
 |----------|------|
-| 15s 不出牌 | 自动 AI 出牌 |
+| 15s 不出牌（真人首次） | **进入 5s 警告宽限期**（广播 `warning:true, grace:true`），不立即 AI 出牌 |
+| 15s 不出牌（真人二次） | 标记 `IsAIControlled=true` + AI 帮出牌 |
 | 主动点击托管 | 立即开启 |
 | 断线超时 | AI 接管 |
 | 匹配补齐 | 全程 AI |
+
+**真人玩家宽限期机制**（修复 .trae/specs/game-fixes 问题 2）：
+
+```
+真人玩家超时
+  ├─ 首次（GraceWarningSent=false）
+  │   ├─ 标记 GraceWarningSent=true
+  │   ├─ 延长计时器 5s
+  │   ├─ 广播 timer 通知 {warning:true, grace:true}
+  │   └─ 不帮出牌，让用户有 5s 操作窗口
+  │
+  └─ 二次（GraceWarningSent=true）
+      ├─ 标记 IsAIControlled=true
+      └─ AI 帮出牌
+```
+
+**重置点**（用户主动操作时重置 `GraceWarningSent`）：
+- `play.go:HandlePlayCards` 用户出牌
+- `game_handler.go:handleCancelAIControl` 用户主动取消托管
+- `game_handler.go:startGameWithState` 新一局开始
+- `room.go:InitGameState` 状态机初始化
+- `room.go:ResetPlayersState` 房间重置
+- `manager.go:onTimeout` AI 出牌后轮到下一个真人
+- `manager.go:botCallLandlord` 5s 延迟后进入出牌阶段
+
+**前端配合**：
+- 收到 `timer_notify` 且 `grace:true` 时，应渲染"即将托管"警告 UI（剩余 5s 倒计时）
+- 收到 `is_ai_controlled:true` 时才显示"取消托管"按钮
+
 
 ### 5.5 密码安全
 
@@ -458,6 +490,15 @@ func TestDealCards_ThreePlayers(t *testing.T)    // 场景描述
 ---
 
 ## 九、部署运维
+
+### 9.0 本地开发脚本
+
+| 平台 | 启动 | 停止 | 说明 |
+|------|------|------|------|
+| Windows | `start.bat` | `stop.bat` | 编译二进制 → 检查端口 → 启动服务 → 显示状态 |
+| Linux/macOS | `./start.sh` | `./stop.sh` | 编译二进制 → 检查端口 → 后台启动 → PID 管理 |
+| 通用 | `make run-game` | `Ctrl+C` | 仅启动 game-service（前台运行） |
+| 通用 | `make run-user` | `Ctrl+C` | 仅启动 user-api（前台运行） |
 
 ### 9.1 环境配置
 

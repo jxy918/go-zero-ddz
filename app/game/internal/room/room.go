@@ -3,10 +3,12 @@ package room
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
+	"github.com/zeromicro/go-zero/core/logx"
+
+	"go-zero-ddz/app/game/internal/errors"
 	"go-zero-ddz/pkg/cardutil"
 	"go-zero-ddz/pkg/types"
 )
@@ -28,9 +30,13 @@ type Player struct {
 	IsOnline       bool
 	IsLandlord     bool
 	IsAIControlled bool
-	Cards          []cardutil.Card
-	Role           types.PlayerRole
-	DisconnectAt   time.Time // 断线时间
+	// GraceWarningSent 真人玩家首次出牌超时已进入"警告宽限期"标记。
+	// 用于区分"从未超时过"vs"已收到过警告但未响应"。
+	// 用户手动出牌或主动取消托管时应重置为 false。
+	GraceWarningSent bool
+	Cards            []cardutil.Card
+	Role             types.PlayerRole
+	DisconnectAt     time.Time // 断线时间
 }
 
 // Room 房间
@@ -54,6 +60,9 @@ type Room struct {
 	LastPattern     cardutil.CardPattern
 	PassCount       int
 	IsLastRound     bool // 连续 PASS 后标记，表示需要回到最后出牌的人
+
+	// 打牌轮次记录（用于回放）
+	PlayRounds []types.PlayRoundRecord
 
 	// 底牌
 	BottomCards []cardutil.Card
@@ -95,7 +104,8 @@ func (r *Room) InitGameState() *GameStateMachine {
 	for _, player := range r.Players {
 		if !player.IsBot {
 			player.IsAIControlled = false
-			log.Printf("Room %s: InitGameState reset player %s IsAIControlled to false", r.ID, player.UID)
+			player.GraceWarningSent = false
+			logx.Infof("Room %s: InitGameState reset player %s IsAIControlled to false", r.ID, player.UID)
 		}
 	}
 	r.mu.Unlock()
@@ -120,11 +130,11 @@ func (r *Room) AddPlayer(player *Player) error {
 	defer r.mu.Unlock()
 
 	if len(r.Players) >= 3 {
-		return fmt.Errorf("room is full")
+		return errors.ErrRoomFull
 	}
 
 	if _, exists := r.Players[player.UID]; exists {
-		return fmt.Errorf("player already in room")
+		return errors.ErrPlayerExists
 	}
 
 	r.Players[player.UID] = player
@@ -139,7 +149,7 @@ func (r *Room) RemovePlayer(uid string) error {
 	defer r.mu.Unlock()
 
 	if _, exists := r.Players[uid]; !exists {
-		return fmt.Errorf("player not in room")
+		return errors.ErrPlayerNotInRoom
 	}
 
 	delete(r.Players, uid)
@@ -188,31 +198,24 @@ func (r *Room) ResetPlayersState() {
 	for _, player := range r.Players {
 		player.IsLandlord = false
 		player.IsAIControlled = false
+		player.GraceWarningSent = false
 		player.Cards = nil
 		player.Role = types.RoleUnknown
 	}
-	log.Printf("Room %s: all players state reset", r.ID)
+	logx.Infof("Room %s: all players state reset", r.ID)
 }
 
 // SetReady 设置玩家准备状态
 func (r *Room) SetReady(uid string, ready bool) error {
-	log.Printf("Room %s: SetReady acquiring write lock", r.ID)
 	r.mu.Lock()
-	log.Printf("Room %s: SetReady acquired write lock", r.ID)
-	defer func() {
-		log.Printf("Room %s: SetReady releasing write lock", r.ID)
-		r.mu.Unlock()
-	}()
+	defer r.mu.Unlock()
 
 	player, exists := r.Players[uid]
 	if !exists {
-		log.Printf("SetReady: player %s not found in room", uid)
-		return fmt.Errorf("player not found")
+		return errors.ErrPlayerNotFound
 	}
 
-	oldReady := player.IsReady
 	player.IsReady = ready
-	log.Printf("SetReady: player %s changed from %v to %v", uid, oldReady, ready)
 	return nil
 }
 
@@ -266,7 +269,7 @@ func (r *Room) StopTimer() {
 // StartBotJoinTimer 启动机器人加入计时器
 func (r *Room) StartBotJoinTimer(timeout int) {
 	r.timerLock.Lock()
-	log.Printf("Room %s: starting bot join timer with %d seconds timeout", r.ID, timeout)
+	logx.Infof("Room %s: starting bot join timer with %d seconds timeout", r.ID, timeout)
 
 	// 如果已有计时器，先停止
 	if r.botJoinTimer != nil {
@@ -292,24 +295,24 @@ func (r *Room) StartBotJoinTimer(timeout int) {
 	go func(roomID string, countdownFunc func(*Room, int), timeoutFunc func(*Room), roomRef *Room) {
 		// 先发送初始倒计时
 		if countdownFunc != nil {
-			log.Printf("Room %s: calling countdown callback for %d seconds", roomID, timeout)
+			logx.Infof("Room %s: calling countdown callback for %d seconds", roomID, timeout)
 			countdownFunc(roomRef, timeout)
-			log.Printf("Room %s: countdown callback completed for %d seconds", roomID, timeout)
+			logx.Infof("Room %s: countdown callback completed for %d seconds", roomID, timeout)
 		}
 
 		// 每秒倒计时
 		for i := timeout - 1; i > 0; i-- {
 			select {
 			case <-ctx.Done():
-				log.Printf("Room %s: bot join timer canceled", roomID)
+				logx.Infof("Room %s: bot join timer canceled", roomID)
 				return
 			case <-time.After(time.Second):
-				log.Printf("Room %s: bot join countdown: %d seconds left", roomID, i)
+				logx.Infof("Room %s: bot join countdown: %d seconds left", roomID, i)
 				// 调用倒计时回调
 				if countdownFunc != nil {
-					log.Printf("Room %s: calling countdown callback for %d seconds", roomID, i)
+					logx.Infof("Room %s: calling countdown callback for %d seconds", roomID, i)
 					countdownFunc(roomRef, i)
-					log.Printf("Room %s: countdown callback completed for %d seconds", roomID, i)
+					logx.Infof("Room %s: countdown callback completed for %d seconds", roomID, i)
 				}
 			}
 		}
@@ -317,17 +320,17 @@ func (r *Room) StartBotJoinTimer(timeout int) {
 		// 等待最后一秒
 		select {
 		case <-ctx.Done():
-			log.Printf("Room %s: bot join timer canceled", roomID)
+			logx.Infof("Room %s: bot join timer canceled", roomID)
 			return
 		case <-time.After(time.Second):
-			log.Printf("Room %s: bot join timer expired, about to call timeout callback", roomID)
+			logx.Infof("Room %s: bot join timer expired, about to call timeout callback", roomID)
 			// 超时了，添加机器人
 			if timeoutFunc != nil {
-				log.Printf("Room %s: calling timeout callback", roomID)
+				logx.Infof("Room %s: calling timeout callback", roomID)
 				timeoutFunc(roomRef)
-				log.Printf("Room %s: timeout callback completed", roomID)
+				logx.Infof("Room %s: timeout callback completed", roomID)
 			} else {
-				log.Printf("Room %s: timeout callback is nil!", roomID)
+				logx.Infof("Room %s: timeout callback is nil!", roomID)
 			}
 		}
 	}(roomID, onCountdown, onTimeout, room)
@@ -419,6 +422,11 @@ func (r *Room) GetOtherPeasant(currentUID string) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	currentPlayer, exists := r.Players[currentUID]
+	if !exists || currentPlayer.IsLandlord {
+		return "", false
+	}
+
 	for uid, p := range r.Players {
 		if uid != currentUID && !p.IsLandlord {
 			return uid, true
@@ -444,6 +452,13 @@ func (r *Room) GetCardCounts() map[string]int {
 		counts[uid] = len(p.Cards)
 	}
 	return counts
+}
+
+// SetIsLastRound 设置 IsLastRound 标记
+func (r *Room) SetIsLastRound(value bool) {
+	r.mu.Lock()
+	r.IsLastRound = value
+	r.mu.Unlock()
 }
 
 // removeString 从切片中移除元素

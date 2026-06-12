@@ -13,10 +13,15 @@ import (
 type GameStateMachine struct {
 	room           *Room
 	callRecords    []types.CallRecord
-	callCount      int // 已叫人数
-	currentCallIdx int // 当前叫地主的玩家索引
-	callRound      int // 当前叫地主轮次（1-3轮）
-	passCount      int // 连续pass人数
+	callCount      int    // 已叫人数
+	currentCallIdx int    // 当前叫地主的玩家索引
+	callRound      int    // 当前叫地主轮次（1-3轮）
+	passCount      int    // 连续pass人数
+	lastCallerUID  string // 最后一个叫地主的玩家UID（用于在ConfirmLandlord时确定地主）
+
+	// LandlordReady 当 ConfirmLandlord 的 5 秒延迟结束后关闭，
+	// 用于通知其他 goroutine（如 manager.go 中的发牌逻辑）底牌已发放给地主。
+	LandlordReady chan struct{}
 }
 
 // NewGameStateMachine 创建游戏状态机
@@ -71,6 +76,9 @@ func (gsm *GameStateMachine) CallLandlord(uid string, action int, score int32) e
 		return fmt.Errorf("not in calling state")
 	}
 
+	// 关键修复：玩家叫地主后立即清除定时器，避免倒计时继续
+	gsm.room.StopTimer()
+
 	// 记录叫分
 	record := types.CallRecord{UID: uid, Action: action, Score: score}
 	gsm.callRecords = append(gsm.callRecords, record)
@@ -79,9 +87,15 @@ func (gsm *GameStateMachine) CallLandlord(uid string, action int, score int32) e
 	// 更新最高分
 	if action == 1 && score > gsm.room.CallScore {
 		gsm.room.CallScore = score
-		gsm.room.LandlordUID = uid
-		gsm.passCount = 0 // 有人叫地主，重置pass计数
-		log.Printf("Room %s: player %s called landlord with score %d", gsm.room.ID, uid, score)
+		// 不要立即设置 LandlordUID！只记录叫分者
+		// 只有在 ConfirmLandlord() 时才最终确定地主
+		gsm.lastCallerUID = uid
+		// 每当有人叫出更高分时，重置 passCount = 0
+		// 因为需要重新累计其他玩家的pass来确定地主
+		// 例如：玩家1叫1分→玩家2pass→玩家3叫2分→此时passCount应该重置为0
+		// 然后从玩家1开始继续叫，直到其他2人都pass才确定地主
+		gsm.passCount = 0
+		log.Printf("Room %s: player %s called landlord with score %d, CallScore=%d, passCount reset to 0", gsm.room.ID, uid, score, gsm.room.CallScore)
 	} else {
 		gsm.passCount++
 		log.Printf("Room %s: player %s passed (passCount=%d)", gsm.room.ID, uid, gsm.passCount)
@@ -100,7 +114,7 @@ func (gsm *GameStateMachine) CallLandlord(uid string, action int, score int32) e
 	return nil
 }
 
-// AllCalled 是否所有人都叫过了（3轮或连续3次pass）
+// AllCalled 是否所有人都叫过了（3轮或连续3次pass或叫地主后其他人都pass）
 func (gsm *GameStateMachine) AllCalled() bool {
 	// 3轮叫地主完成
 	if gsm.callRound >= 3 {
@@ -108,6 +122,13 @@ func (gsm *GameStateMachine) AllCalled() bool {
 	}
 	// 连续3人pass（没人叫地主）
 	if gsm.passCount >= 3 {
+		return true
+	}
+	// 如果有人叫了地主，且其他两个玩家都已经pass
+	// 叫地主后，剩下两个玩家都pass = 地主确定
+	// 使用 lastCallerUID 而不是 LandlordUID，因为 LandlordUID 只在 ConfirmLandlord 时设置
+	if gsm.lastCallerUID != "" && gsm.passCount >= 2 {
+		log.Printf("Room %s: AllCalled=true - LandlordUID=%s, passCount=%d", gsm.room.ID, gsm.room.LandlordUID, gsm.passCount)
 		return true
 	}
 	return false
@@ -138,21 +159,25 @@ func (gsm *GameStateMachine) ConfirmLandlord() error {
 	log.Printf("ConfirmLandlord called for room %s", gsm.room.ID)
 	gsm.room.mu.Lock()
 
-	log.Printf("Room %s: before confirm, landlord_uid=%s, call_score=%d", gsm.room.ID, gsm.room.LandlordUID, gsm.room.CallScore)
+	log.Printf("Room %s: before confirm, lastCallerUID=%s, call_score=%d", gsm.room.ID, gsm.lastCallerUID, gsm.room.CallScore)
 
-	if gsm.room.LandlordUID == "" {
+	if gsm.room.CallScore == 0 || gsm.lastCallerUID == "" {
 		// 没人叫地主，随机选一个玩家当地主
 		randIdx := int(time.Now().UnixNano()/1e9) % len(gsm.room.PlayerIDs)
 		gsm.room.LandlordUID = gsm.room.PlayerIDs[randIdx]
 		gsm.room.BaseScore = 1
 		log.Printf("Room %s: no landlord called, randomly selecting %s as landlord", gsm.room.ID, gsm.room.LandlordUID)
+	} else {
+		// 有人叫地主，使用最后一个叫地主的玩家
+		gsm.room.LandlordUID = gsm.lastCallerUID
+		log.Printf("Room %s: landlord confirmed: %s with score %d", gsm.room.ID, gsm.room.LandlordUID, gsm.room.CallScore)
 	}
 
 	// 重置所有非机器人玩家的AI托管状态
-	for _, player := range gsm.room.Players {
-		if !player.IsBot {
+	for uid := range gsm.room.Players {
+		if player, exists := gsm.room.Players[uid]; exists && !player.IsBot {
 			player.IsAIControlled = false
-			log.Printf("Room %s: ConfirmLandlord reset player %s IsAIControlled to false", gsm.room.ID, player.UID)
+			log.Printf("Room %s: ConfirmLandlord reset player %s IsAIControlled to false", gsm.room.ID, uid)
 		}
 	}
 
@@ -176,42 +201,34 @@ func (gsm *GameStateMachine) ConfirmLandlord() error {
 		}
 	}
 
+	// 给地主发放底牌
+	landlord.Cards = append(landlord.Cards, gsm.room.BottomCards...)
+	landlord.Cards = cardutil.SortCards(landlord.Cards)
+	log.Printf("Room %s: landlord %s received bottom cards, total cards: %d", gsm.room.ID, gsm.room.LandlordUID, len(landlord.Cards))
+
 	// 设置第一个出牌的玩家（地主）
 	gsm.room.CurrentTurnUID = gsm.room.LandlordUID
-	// 先保存状态信息，然后释放锁
-	roomID := gsm.room.ID
-	landlordUID := gsm.room.LandlordUID
-	baseScore := gsm.room.BaseScore
-	bottomCards := make([]cardutil.Card, len(gsm.room.BottomCards))
-	copy(bottomCards, gsm.room.BottomCards)
-	// 保存旧状态，但不立即切换到新状态
+	// 保存旧状态
 	oldState := gsm.room.State
+	// 现在切换到出牌状态
+	gsm.room.State = types.StatePlaying
 	gsm.room.mu.Unlock()
 
-	// 停止之前的计时器，防止5秒延迟内提前触发超时
+	// 停止之前的计时器
 	gsm.room.StopTimer()
 
-	log.Printf("Room %s: landlord confirmed: %s, base_score=%d, showing bottom cards for 5 seconds",
-		roomID, landlordUID, baseScore)
+	// 初始化 LandlordReady 信号 channel，用于通知 manager.go 等候的 goroutine
+	gsm.LandlordReady = make(chan struct{})
+	// 立即关闭信号 channel，通知 manager.go 底牌已发放、地主手牌已就绪
+	close(gsm.LandlordReady)
 
-	// 延迟5秒后再把底牌发给地主并切换状态
-	time.AfterFunc(5*time.Second, func() {
-		gsm.room.mu.Lock()
-		// 给地主发放底牌
-		if landlord, exists := gsm.room.Players[landlordUID]; exists {
-			landlord.Cards = append(landlord.Cards, bottomCards...)
-			landlord.Cards = cardutil.SortCards(landlord.Cards)
-			log.Printf("Room %s: landlord %s received bottom cards, total cards: %d", roomID, landlordUID, len(landlord.Cards))
-		}
-		// 现在切换到出牌状态
-		gsm.room.State = types.StatePlaying
-		gsm.room.mu.Unlock()
+	log.Printf("Room %s: landlord confirmed: %s, base_score=%d, state transitioned to playing",
+		gsm.room.ID, gsm.room.LandlordUID, gsm.room.BaseScore)
 
-		// 调用状态变更回调
-		if gsm.room.OnStateChange != nil {
-			gsm.room.OnStateChange(gsm.room, oldState, types.StatePlaying)
-		}
-	})
+	// 调用状态变更回调
+	if gsm.room.OnStateChange != nil {
+		gsm.room.OnStateChange(gsm.room, oldState, types.StatePlaying)
+	}
 
 	return nil
 }
@@ -249,6 +266,9 @@ func (gsm *GameStateMachine) PlayCards(uid string, cards []cardutil.Card) (*card
 			// 设置一个标记，表示连续 PASS，需要特殊处理
 			gsm.room.IsLastRound = true
 			log.Printf("Room %s: two consecutive passes, returning turn to %s", gsm.room.ID, lastPlayedUID)
+		} else {
+			// 推进到下一个回合（已持有锁，使用 Locked 版本）
+			gsm.NextTurnAfterPlayLocked()
 		}
 
 		log.Printf("Room %s: player %s passed (passCount=%d)", gsm.room.ID, uid, gsm.room.PassCount)
@@ -265,11 +285,14 @@ func (gsm *GameStateMachine) PlayCards(uid string, cards []cardutil.Card) (*card
 	if gsm.room.LastPlayedUID == "" || gsm.room.PassCount >= 2 {
 		gsm.room.PassCount = 0
 	} else {
-		// 需要大过上家
+		// 需要大过上家：使用 AnalyzePattern 从已出牌中解析出真正的牌型主值
+		// 关键修复：不能直接用 getMainValue(max)，三带一/顺子等牌型的主值
+		// 不等于最大牌面值（例如三带一 5553 的主值是 5 不是 3 的最大值）
+		lastAnalyzed := cardutil.AnalyzePattern(gsm.room.LastPlayedCards)
 		lastPlay := cardutil.PlayResult{
 			Valid:   true,
 			Pattern: gsm.room.LastPattern,
-			Main:    getMainValue(gsm.room.LastPlayedCards),
+			Main:    lastAnalyzed.Main,
 			Length:  len(gsm.room.LastPlayedCards),
 		}
 
@@ -293,6 +316,20 @@ func (gsm *GameStateMachine) PlayCards(uid string, cards []cardutil.Card) (*card
 	gsm.room.PassCount = 0
 	gsm.room.IsLastRound = false // 清除连续PASS标记，因为有玩家出了牌
 
+	// 添加打牌轮次记录
+	cardValues := make([]int, len(cards))
+	for i, c := range cards {
+		cardValues[i] = int(c.Value)
+	}
+	gsm.room.PlayRounds = append(gsm.room.PlayRounds, types.PlayRoundRecord{
+		RoundIndex: len(gsm.room.PlayRounds),
+		PlayerUID:  uid,
+		Action:     types.PlayActionPlay,
+		Cards:      cardValues,
+		Pattern:    result.Pattern.String(),
+		Timestamp:  time.Now().Unix(),
+	})
+
 	// 检查炸弹，增加倍数
 	if result.Pattern.IsBomb() {
 		gsm.room.Multiplier *= 2
@@ -308,22 +345,44 @@ func (gsm *GameStateMachine) PlayCards(uid string, cards []cardutil.Card) (*card
 	}
 
 	log.Printf("Room %s: player %s played %v, remaining cards: %d", gsm.room.ID, uid, cardutil.CardsToString(cards), len(player.Cards))
+
+	// 推进到下一个玩家（已持有锁，使用 Locked 版本）
+	gsm.NextTurnAfterPlayLocked()
+	// 停止当前计时器，等待下一个玩家启动新计时器
+	gsm.room.StopTimer()
+
 	return &result, false, nil
 }
 
 // NextTurnAfterPlay 出牌后推进到下一个回合
+// 注意：调用此方法前必须确保没有持有 room.mu 锁，否则会造成死锁
 func (gsm *GameStateMachine) NextTurnAfterPlay() string {
-	gsm.room.mu.RLock()
-	currentUID := gsm.room.CurrentTurnUID
-	gsm.room.mu.RUnlock()
-
-	nextUID := gsm.room.NextTurn(currentUID)
-
 	gsm.room.mu.Lock()
+	currentUID := gsm.room.CurrentTurnUID
+	nextUID := gsm.room.NextTurn(currentUID)
 	gsm.room.CurrentTurnUID = nextUID
 	gsm.room.mu.Unlock()
 
 	return nextUID
+}
+
+// NextTurnAfterPlayLocked 出牌后推进到下一个回合（已持有锁版本）
+// 注意：调用此方法前必须已经持有 room.mu 锁
+func (gsm *GameStateMachine) NextTurnAfterPlayLocked() string {
+	currentUID := gsm.room.CurrentTurnUID
+
+	// 直接计算下一个玩家（已持有锁，不需要再获取锁）
+	for i, uid := range gsm.room.PlayerIDs {
+		if uid == currentUID {
+			// 逆时针方向：i-1，处理边界情况
+			nextIdx := (i - 1 + len(gsm.room.PlayerIDs)) % len(gsm.room.PlayerIDs)
+			nextUID := gsm.room.PlayerIDs[nextIdx]
+			gsm.room.CurrentTurnUID = nextUID
+			log.Printf("Room %s: turn changed from %s to %s", gsm.room.ID, currentUID, nextUID)
+			return nextUID
+		}
+	}
+	return ""
 }
 
 // CalculateSettlement 计算结算结果

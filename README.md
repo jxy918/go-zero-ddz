@@ -1,5 +1,8 @@
 # go-zero-ddz 斗地主联机游戏
 
+![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=flat&logo=go)
+![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat)
+![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-blue?style=flat)
 
 一款基于 go-zero 后端 + Web 前端的经典三人斗地主在线卡牌游戏。
 
@@ -195,14 +198,37 @@ go mod tidy
 make docker-up
 
 # 4. 启动用户 API 服务
-go run app/user/user.go -f app/user/etc/user-api.yaml
+make run-user
 
 # 5. 启动游戏 WebSocket 服务
-go run app/game/cmd/server/main.go -f app/game/etc/game-local.yaml
+make run-game
 
 # 6. 打开浏览器访问
 # http://localhost:8080/
 ```
+
+### 一键启动/停止
+
+```bash
+# Windows
+start.bat          # 启动所有服务
+stop.bat           # 停止所有服务
+
+# Linux / macOS
+./start.sh         # 启动所有服务
+./stop.sh          # 停止所有服务
+```
+
+### 脚本说明
+
+| 脚本 | 平台 | 功能 |
+|------|------|------|
+| `start.bat` | Windows | 编译二进制、检查端口、启动 game-service 和 user-api |
+| `stop.bat` | Windows | 停止 game-service 和 user-api，清理残留进程 |
+| `start.sh` | Linux/macOS | 编译二进制、检查端口、后台启动服务 |
+| `stop.sh` | Linux/macOS | 优雅停止服务（SIGTERM → SIGKILL） |
+
+脚本自动执行：编译二进制文件 → 检查端口占用 → 启动服务 → 显示访问地址
 
 ### API 接口
 

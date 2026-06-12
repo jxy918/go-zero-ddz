@@ -11,12 +11,12 @@ import (
 // Client 表示一个 WebSocket 客户端连接
 type Client struct {
 	ID       string
-	UID      string           // 用户 ID（登录后填充）
-	RoomID   string           // 所在房间 ID
+	UID      string // 用户 ID（登录后填充）
+	RoomID   string // 所在房间 ID
 	Conn     *websocket.Conn
-	Send     chan []byte      // 发送消息队列
+	Send     chan []byte // 发送消息队列
 	mu       sync.RWMutex
-	lastPing time.Time        // 最后一次心跳时间
+	lastPing time.Time // 最后一次心跳时间
 }
 
 // NewClient 创建新客户端

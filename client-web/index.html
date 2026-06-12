@@ -43,7 +43,7 @@
             </div>
             
             <div class="lobby-actions">
-                <button id="create-room-btn" class="btn primary" onclick="debugCreateRoom()">创建房间</button>
+                <button id="create-room-btn" class="btn primary">创建房间</button>
                 <div class="join-room">
                     <input type="text" id="room-id-input" placeholder="房间号">
                     <button id="join-room-btn" class="btn">加入</button>
@@ -147,11 +147,11 @@
             
             <!-- 历史出牌记录 - 放在最上方 -->
             <div class="history-panel-wrapper">
-                <div class="history-panel collapsed">
+                <div class="history-panel">
                     <div class="history-header" id="history-header">
                         <span class="history-title">出牌记录</span>
                         <span class="history-stats">已出: <span id="total-played-count">0</span>/54</span>
-                        <button class="history-toggle" id="history-toggle">▶</button>
+                        <button class="history-toggle" id="history-toggle">▼</button>
                     </div>
                     <div class="history-list" id="history-list">
                         <!-- 历史记录动态生成 -->
@@ -161,6 +161,12 @@
             
             <!-- 中间：出牌区域 -->
             <div class="play-area">
+                <!-- 广播消息区域 -->
+                <div class="broadcast-area" id="broadcast-area">
+                    <div id="broadcast-message" style="display: none;"></div>
+                </div>
+                
+                <!-- 当前玩家指示 -->
                 <div class="current-player-indicator" id="current-player">等待开始...</div>
                 
                 <!-- 底牌显示区域 -->
@@ -169,6 +175,7 @@
                     <div class="bottom-cards" id="bottom-cards"></div>
                 </div>
                 
+                <!-- 最后出牌显示 -->
                 <div class="last-play-display" id="last-play-display">
                     <div class="play-info">
                         <span id="last-player">-</span> 出了
@@ -206,13 +213,15 @@
             </div>
             
             <!-- 叫地主界面 -->
-            <div id="call-landlord-panel" class="panel hidden">
-                <h3>叫地主</h3>
-                <div class="call-buttons">
-                    <button class="btn call-btn" data-score="1">1分</button>
-                    <button class="btn call-btn" data-score="2">2分</button>
-                    <button class="btn call-btn" data-score="3">3分</button>
-                    <button class="btn" id="pass-call-btn">不叫</button>
+            <div id="call-landlord-overlay" class="panel-overlay hidden">
+                <div id="call-landlord-panel" class="panel">
+                    <h3>🃏 叫地主</h3>
+                    <div class="call-buttons">
+                        <button class="btn call-btn" data-score="1">1分</button>
+                        <button class="btn call-btn" data-score="2">2分</button>
+                        <button class="btn call-btn" data-score="3">3分</button>
+                        <button class="btn" id="pass-call-btn">不叫</button>
+                    </div>
                 </div>
             </div>
             
@@ -220,10 +229,10 @@
         </div>
     </div>
 
-    <script src="js/api.js?v=1"></script>
-    <script src="js/websocket.js?v=1"></script>
-    <script src="js/game.js?v=1"></script>
-    <script src="js/main.js?v=1"></script>
+    <script src="js/api.js?v=20260605"></script>
+    <script src="js/websocket.js?v=20260605"></script>
+    <script src="js/game.js?v=20260605"></script>
+    <script src="js/main.js?v=20260605"></script>
     <script>
         function debugCreateRoom() {
             console.log('=== Debug Create Room ===');

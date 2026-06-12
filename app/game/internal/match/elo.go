@@ -2,9 +2,9 @@ package match
 
 // TierInfo 段位信息
 type TierInfo struct {
-	Name  string
-	Min   int32
-	Max   int32
+	Name string
+	Min  int32
+	Max  int32
 }
 
 // 段位定义
@@ -46,11 +46,11 @@ func GetTierIndex(tier string) int {
 
 // ELOChange ELO 变化计算
 type ELOChange struct {
-	OldELO  int32
-	NewELO  int32
-	Delta   int32
-	OldTier string
-	NewTier string
+	OldELO   int32
+	NewELO   int32
+	Delta    int32
+	OldTier  string
+	NewTier  string
 	Promoted bool
 	Demoted  bool
 }
